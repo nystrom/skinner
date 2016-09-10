@@ -1,0 +1,236 @@
+\documentclass[nocopyrightspace,10pt]{sigplanconf}
+% \documentclass[nocopyrightspace,10pt]{sig-alternate-05-2015}
+\newif\ifdraft
+\draftfalse
+\newif\ifsigplanconf
+\sigplanconftrue
+\newif\ifsubmission
+\submissionfalse
+
+\usepackage{times-lite}
+\usepackage{mathptm}
+\usepackage{txtt}
+\usepackage{stmaryrd}
+%\usepackage{ttquot}
+%\usepackage{angle}
+\usepackage{proof}
+\usepackage{bcprules}
+\usepackage{amsmath}
+\usepackage{amssymb}
+%\usepackage{amsthm}
+\usepackage{afterpage}
+\usepackage{balance}
+\usepackage{color}
+\usepackage{listings}
+\usepackage{xspace}
+
+\newcommand\secref[1]{Section~\ref{#1}}
+\newcommand\figref[1]{Figure~\ref{#1}}
+
+%\newcommand\todo[1]{{\color{red}{[\textsf{TODO:} \emph{#1}]}}}
+\newcommand\todo[1]{}
+\newcommand\eat[1]{}
+
+\renewcommand\c[1]{\normalfont{\texttt{#1}}}
+\renewcommand\k[1]{\texttt{\textbf{#1}}}
+\newcommand\e[1]{\emph{#1}}
+
+\newcommand{\bnf}{\ensuremath{\ \ | \ \ }}
+\newcommand{\ty}{\ensuremath{\!:\!}}
+
+\newcommand\stepsone{\rightarrow}
+\newcommand\stepsmany{\rightarrow^*}
+\newcommand\effect[1]{\xrightarrow{#1}}
+\newcommand\xstepsone[1]{\xrightarrow{#1}}
+\newcommand\xstepsmany[1]{\xrightarrow{#1}{\!\!}^*\;}
+
+\newcommand\Lb{\llbracket}
+\newcommand\Rb{\rrbracket}
+\newcommand\SB[1]{\Lb#1\Rb} % put double brackets around the argument
+\newenvironment{SBE}{\left\Lb\begin{array}{c}}%
+{\end{array}\right\Rb}
+
+\newcommand\many[1]{\overline{#1}}
+\newcommand\lift[1]{\lfloor{#1}\rfloor}
+
+
+\usepackage{graphicx}
+
+\ifdraft
+\usepackage{layout}
+\fi
+
+\usepackage{ifpdf}
+
+% make it A4 despite ACM 
+% \ifpdf
+% \setlength{\pdfpagewidth}{210mm}
+% \setlength{\pdfpageheight}{297mm}
+% \fi
+
+\hyphenation{name-space}
+\hyphenation{name-spaces}
+
+% redefine \andalso from bcprules to tighten up space
+\renewcommand{\andalso}{\quad}
+
+%\lefthyphenmin=1
+%\righthyphenmin=1
+
+
+\begin{document}
+
+\eat{
+\conferenceinfo{PPoPP 2014} {February 2014, Orlando, Florida.}
+\copyrightyear{2013}
+\copyrightdata{}
+}
+
+\title{There's more than one way to skin a cat}
+
+\ifsigplanconf
+
+\authorinfo{Nathaniel Nystrom}
+   {Faculty of Informatics \\ Universit\`a della Svizzera italiana \\
+   Lugano, Switzerland}
+   {nate.nystrom@usi.ch}
+
+   \else
+
+\numberofauthors{1} 
+\author{
+\alignauthor
+  Nathaniel Nystrom \\
+  \affaddr{Faculty of Informatics} \\
+  \affaddr{Universit\`a della Svizzera italiana} \\
+  \affaddr{Lugano, Switzerland} \\
+  \email{nate.nystrom@usi.ch}
+}
+
+\fi
+
+\vspace{-1cm}
+\maketitle
+
+\sloppy
+
+\bibliographystyle{plain}
+
+\begin{abstract}
+  When developing a new programming language,
+  writing a parser
+  is a necessary, but often tedious, task.
+  During development, a language developer may want to experiment with
+  different styles of concrete syntax: should the language be
+  indentation-based
+  like Python or Haskell,
+  or should it belong to the curly-brackets family of languages
+  (C, Java, etc.)?
+
+  Skinner is a tool that automatically generates a parser directly 
+  from abstract-syntax-tree definitions, using a \emph{language skin}
+  to seed the parser generator with the appropriate syntax.
+  The language skin includes a grammar template, a
+  description of the lexical and syntactic features of the skin language.
+  For instance, a Python language skin
+  would contain a template for a scanner and parser for Python.
+  Skinner tries to match the AST types to
+  constructs in the grammar, using existing rules,
+  removing unused rules, and
+  creating new rules as necessary to instantiate a parser that generates
+  the given ASTs. The user can use
+  the generated parser as is, or modify it to taste.
+
+\end{abstract}
+
+\section{Language skins}
+\label{sec:intro}
+
+A language skin contains a template grammar and other declarations
+needed to describe the language used to seed the parser generator.
+The template grammar
+is simply a context-free grammar in which
+each
+rule has an associated semantic action that
+invokes a factory method to create the abstract syntax.
+The skin provides an interface
+but no implementation of these factory methods.
+Rules and factory methods are typed using AST interface types declared
+in the skin.
+
+To subjectively improve the quality
+of the generated parser,
+the grammar
+template can be augmented with additional rules in the style of the 
+skin language.
+For instance, although Java does not have tuples,
+the Java skin contains additional rules to parse tuples.
+% Using these rules,
+% the generated parser can handle tuple-like constructs.
+
+\section{The skinning process}
+\label{sec:matching}
+
+Matching AST classes to the template grammar is done as follows.
+The AST types and the types in the skin are matched
+by name.
+Rather than performing an exact match, names are matched approximately.
+The skin specifies sets of aliases
+to allow for divergent naming schemes. For example, since ``plus''
+and ``add'' are considered aliases, a
+\c{PlusExp} AST class can be matched with the \c{Add} skin interface type.
+
+Expressions are generated to create instances of the AST classes.
+For instance, given the following AST classes:
+\begin{verbatim}
+abstract class Exp
+class Value(int value) extends Exp
+class Bin(Op op, Exp left, Exp right) extends Exp
+enum Op { Plus, Minus }
+\end{verbatim}
+the following instantiation expressions are generated:
+\begin{verbatim}
+new Value(value)
+new Bin(Plus, left, right)
+new Bin(Minus, left, right)
+\end{verbatim}
+These expressions are then matched against the factory method interface
+in the skin. The parameters of a matched factory method are renamed
+to provide bindings for each of
+free variables in the instantiation expression. Coercions
+are generated if necessary to pass values of the correct type. 
+Since there may be many factory methods with the same type,
+the matching process also uses the names of the methods and of the AST
+classes to find an appropriate match, similar to how types are matched. 
+For example, the \c{IntLit} factory method might be matched against the
+\c{Value} expression above, resulting in the following implementation:
+\begin{verbatim}
+Exp IntLit(int v) { return new Value(v); }
+\end{verbatim}
+
+New grammar rules are generated for any unmatched instantiation expression.
+The new rule is based
+on rules in the template grammar.
+A left-hand-side nonterminal of the correct type is selected and the rule's
+right-hand-side is generated to provide semantic values of the appropriate
+types, using existing grammar symbols. The AST class name is used to create a new keyword, which is added as
+a token to the scanner.
+
+The resulting grammar is pruned to remove unused rules and symbols.
+The grammar is then used to generate a GLR parser that creates the AST.
+
+\section{Conclusions}
+\label{sec:conclusion}
+
+Language skinning allows a developer to concentrate on the semantics of the
+language rather than the concrete syntax. 
+We find Skinner to be useful for generating parsers for DSLs and small teaching languages,
+and for experimenting with different concrete syntaxes in larger
+programming languages.
+
+%\balance
+% \bibliography{bib}
+
+% \clearpage
+
+\end{document}
