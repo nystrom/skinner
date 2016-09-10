@@ -1,0 +1,235 @@
+module Main (main) where
+
+import Data.Monoid
+import Control.Applicative((<$>), (<*>), (<*), (*>), (<$))
+import Control.Monad.State
+import Control.Monad.Reader
+import System.Environment (getArgs)
+import Data.List ((\\), find, sortBy, sortOn, minimum, minimumBy)
+import Data.List (intercalate)
+import Data.Char (toLower, toUpper, isLower, isUpper)
+import Data.Maybe (catMaybes, listToMaybe)
+import Debug.Trace (trace)
+import Text.Parsec (parse)
+
+import Aliases
+import AST
+import JASTParse
+import SkinParse
+import Typer
+import TreeMatch3
+import Synth
+
+-- printf debugging
+debug :: (Monad m) => String -> m ()
+debug s = trace s (return ())
+
+matchConstructorsToSkinAST skin javaConstructors = do
+  match (aliases skin) (AST.constructors skin) javaConstructors
+
+generateNewRules javaConstructors caseMatches =
+  fmap concat $ forM javaConstructors $ \ctor -> do
+    case lookup ctor caseMatches of
+      Nothing -> do
+        -- there is no skin type corresponding to the Java constructor
+        -- let's add one, plus a rule to generate it...
+        let JConstructor name fields superType = ctor
+            t = TCon name []
+            lhs = "expression"
+            -- todo find a rule with the right type
+            findLhsWithType (TCon "List" [TCon "Exp" []]) = [Terminal "(", Nonterminal "argument_list_opt", Terminal ")"]
+            findLhsWithType (TCon "List" [TCon "String" []]) = [Terminal "(", Nonterminal "formal_parameters_opt", Terminal ")"]
+            findLhsWithType (TCon "Array" [TCon "Exp" []]) = [Terminal "(", Nonterminal "argument_list_opt", Terminal ")"]
+            findLhsWithType (TCon "Array" [TCon "String" []]) = [Terminal "(", Nonterminal "formal_parameters_opt", Terminal ")"]
+            findLhsWithType (TCon "Exp" []) = [Nonterminal "expression"]
+            findLhsWithType (TCon "String" []) = [Nonterminal "identifier"]
+            findLhsWithType (TCon "int" []) = [Nonterminal "integer_literal"]
+            findLhsWithType (TCon "boolean" []) = [Nonterminal "boolean_literal"]
+            findLhsWithType t = error $ "missing case " ++ show t
+            params = ["a" ++ (show n) | n <- [1..]]
+            synthRhs name types = (Terminal (map toLower name), "_") : zip (concatMap findLhsWithType types) params
+            types = map snd fields
+            rhs = synthRhs name types
+            args = map (Var . snd) (zip types params)
+            action = foldl App (K name) args
+          in return [Rule t lhs rhs action]
+      Just kase -> do
+        -- kase is the Java constructor corresponding to ctor
+        return []
+
+data JExp = JNew String [JExp]
+          | JOp String [JExp]
+          | JK String
+          | JVar String
+          | JCast String JExp
+  deriving (Show)
+
+-- TODO return expr of lowest cost!
+matchConstructors :: JConstructor -> Reader (Skin, [JConstructor], [JEnum]) (Maybe (Int, JConstructor, JExp))
+matchConstructors (JConstructor label fields super) = do
+  (skin, javaConstructors, enums) <- ask
+  rs <- forM (constructors skin) $ \k @ (JConstructor skinLabel skinFields skinSuper) -> do
+    let n = length fields
+    let m = length skinFields
+    if n == m
+      then do
+        -- TODO: should match types of fields exactly and generate coercions
+        let cost = (10 * matchName skin label skinLabel) + (sum $ map (matchField skin) (zip fields skinFields))
+        let exp = JNew label (map (\(s,t) -> JVar s) skinFields)
+        return [(cost, k, exp)]
+    else if n == m + 1
+      then
+        case fields of
+          ((f,t):fs) -> do
+            -- TODO: should match all members of the enum!
+            -- Add(e1, e2) { Bin(Plus, e1, e2) }
+            -- Mul(e1, e2) { Bin(Times, e1, e2) }
+            -- etc.
+            -- Right now, we just generate ONE call for Bin.
+            -- So, we should enumerate all possible Java constructors
+            -- that take enums.
+            -- We should generate all possible Java constructor _calls_ and
+            -- match these!
+            forM enums $ \(JEnum enum super) -> do
+                  let cost = matchName skin label (show skinSuper) - matchName skin enum skinLabel + (sum $ map (matchField skin) (zip fs skinFields))
+                  let exp = JNew label (JK enum:map (\(s,t) -> JVar s) skinFields)
+                  return (cost, k, exp)
+          [] -> return []
+    else
+      return []
+
+  case sortOn (\(a,b,c) -> a) (concat rs) of
+    (r:rs) -> return $ Just r
+    _ -> return Nothing
+
+  where
+    matchField :: Skin -> ((String, Type), (String, Type)) -> Int
+    matchField skin ((x1, t1), (x2, t2)) = matchType skin t1 t2
+
+    matchType :: Skin -> Type -> Type -> Int
+    matchType skin t1 t2 = matchName skin (show t1) (show t2)
+
+-- OOPS logic messed up!!!
+expandEnums :: JAST -> [JConstructor] -> [JConstructor]
+expandEnums jast js = go (jenums jast) js
+  where
+    go :: [JEnum] -> [JConstructor] -> [JConstructor]
+    go [] js = js
+    go (e:rest) js = (addEnum e js) ++ go rest js
+
+    addEnum :: JEnum -> [JConstructor] -> [JConstructor]
+    addEnum (e @ (JEnum enum esuper)) (JConstructor label ((x,t):fs) super : rest)
+      | t == esuper = (JConstructor label ((x, TCon enum []):fs) super) : addEnum e rest
+    addEnum e (_:rest) = addEnum e rest
+    addEnum e [] = []
+
+matchName :: Skin -> String -> String -> Int
+matchName skin = matchNameWithAliases (aliases skin)
+
+-- match types in the skin to types in the JAST, rewriting the skin
+matchTypes :: Skin -> JAST -> IO Skin
+matchTypes skin jast = do
+  putStrLn "match types"
+  let is = interfaces skin
+  let js = jinterfaces jast
+  let match2 (j @ (JInterface label _)) (i @ (JInterface skinLabel _)) =
+         let cost = matchName skin skinLabel label
+           in (cost, i, j)
+  let ks = filter (\(cost, _, _) -> cost <= 2) $ liftM2 match2 js is
+  putStrLn $ show $ take 10 $ sortOn (\(a,b,c) -> a) ks
+  return $ substSkin (map (\(cost, j, i) -> (j, i)) ks) skin
+
+  where
+    substSkin s skin = skin { interfaces = substInterfaces s (interfaces skin), constructors = substCtors s (constructors skin), rules = substRules s (rules skin) }
+    substInterfaces s js = map (substInterface s) js
+    substCtors s js = map (substCtor s) js
+    substRules s js = map (substRule s) js
+    substRule s (Rule typ label rhs e) = Rule (substType s typ) label rhs e
+    substInterface s (JInterface label super) = JInterface (substLabel s label) (substType s super)
+    substCtor s (JConstructor label fields super) = JConstructor (substLabel s label) (substFields s fields) (substType s super)
+    substFields s fields = map (substField s) fields
+    substField s (x,t) = (x, substType s t)
+    substType s (TCon label ts) = TCon (substLabel s label) (map (substType s) ts)
+    substType s (TVar x) = TVar x
+    substLabel [] label = label
+    substLabel ((JInterface old _, JInterface new _):rest) label
+      | label == old = new
+      | otherwise    = substLabel rest label
+
+-- main and the REPL
+main :: IO ()
+main = do
+  -- Parse arguments
+  args <- getArgs
+  let skinFile = head args
+  let astFile = head (tail args)
+
+  -- read the skin and the java AST files
+  skinput <- readFile $ skinFile
+  jinput <- readFile $ astFile
+
+  -- parse the skin
+  case parse skin skinFile skinput of
+    Left err ->
+      debug $ "unparsable skin: " ++ show err
+    Right skin -> do
+      debug $ "skin: " ++ show skin
+
+      -- parse the java AST file
+      case parse javaAST "ast" jinput of
+        Left err ->
+          debug $ "unparsable java AST description: " ++ show err
+        Right jast -> do
+          debug $ "Java AST:\n" ++ show jast
+
+          typeCheckSkin skin
+
+          -- rename the types to match the JAST
+          skin' <- matchTypes skin jast
+          debug $ "skin': " ++ show skin'
+
+          let javaConstructorsWithEnums = expandEnums jast (jconstructors jast)
+
+          debug $ "expanded enums:"
+          putStrLn $ show javaConstructorsWithEnums
+
+          debug $ "Matching AST with skin:"
+          forM_ javaConstructorsWithEnums $ \k -> case k of
+            JConstructor label fields super -> do
+              case runReader (matchConstructors k) (skin', javaConstructorsWithEnums, jenums jast) of
+                Just (cost, sk, e) ->
+                  putStrLn $ "match " ++ (show k) ++ " cost " ++ (show cost) ++ " factory call " ++ show sk ++ " { " ++ (show e) ++ " }"
+                Nothing ->
+                  putStrLn $ "no match " ++ (show k)
+
+{-
+          -- To synthesize a rule from a Java constructor:
+          -- First: rule placement (what's the LHS?)
+          -- Second: Syntax... "learn" the syntax for an Exp with a Type child, a Stm with a Exp child, etc.
+
+          -- match the skin AST with the Java AST
+          let (cost, caseMatches, typeMatches) = matchConstructorsToSkinAST skin javaConstructors
+          debug $ "cost " ++ show cost
+          debug $ "case " ++ intercalate "\n" (map show caseMatches)
+          debug $ "type " ++ intercalate "\n" (map show typeMatches)
+
+          -- generate new rules
+          newRules <- generateNewRules javaConstructors caseMatches
+          debug $ "new rules = " ++ show newRules
+
+          let simp (ctor, c) = [(ctor, c, TCon "void" [])]
+              modelMap = concatMap simp caseMatches
+
+          debug $ "new grammar"
+
+          forM_ (rules skin ++ newRules) $ \(Rule t lhs rhs action) -> do
+              case synthFromModel action t modelMap of
+                Nothing -> return ()
+                Just x -> do
+                  debug $ "RULE"
+                  debug $ "  " ++ lhs ++ " ::= " ++ show rhs
+                  debug $ "  " ++ show action ++ " :: " ++ show t
+                  debug $ "  " ++ x
+-}
+
+          return ()
