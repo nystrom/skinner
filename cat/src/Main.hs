@@ -5,12 +5,12 @@ import Control.Applicative((<$>), (<*>), (<*), (*>), (<$))
 import Control.Monad.State
 import Control.Monad.Reader
 import System.Environment (getArgs)
-import Data.List ((\\), find, sortBy, sortOn, minimum, minimumBy, nub)
-import Data.List (intercalate)
+import Data.List ((\\), find, sortBy, sortOn, minimum, minimumBy, nub, intercalate)
+import Data.Maybe (catMaybes, listToMaybe, fromMaybe)
 import Data.Char (toLower, toUpper, isLower, isUpper)
-import Data.Maybe (catMaybes, listToMaybe)
 import Debug.Trace (trace)
 import Text.Parsec (parse)
+import Text.Parsec.String
 
 import Aliases
 import AST
@@ -112,16 +112,16 @@ coerce hierarchy e t = go (typeof e) t
     -- Maybe[t] -> t
     go (TCon "Maybe" [u]) t | u == t && isNullable t = Just $ JOp "unMaybe" [e] t
     -- t -> Maybe[t]
-    go s (TCon "Maybe" [w]) | s == w = Just $ JOp "mkMaybe" [e] t
+    go s (TCon "Maybe" [w]) | s == w = Just $ JOp "toMaybe" [e] t
 
     -- (t,t) -> [t]
-    go (TCon label [u, v]) (TCon "List" [w]) | u == w && v == w = Just $ JOp "mkList2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
+    go (TCon label [u, v]) (TCon "List" [w]) | u == w && v == w = Just $ JOp "toList2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
     -- (t,t,t) -> [t]
-    go (TCon label [u, v, w]) (TCon "List" [x]) | u == x && v == x && w == x = Just $ JOp "mkList2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
+    go (TCon label [u, v, w]) (TCon "List" [x]) | u == x && v == x && w == x = Just $ JOp "toList2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
     -- (t,t) -> [t]
-    go (TCon label [u, v]) (TCon "Array" [w]) | u == w && v == w = Just $ JOp "mkArray2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
+    go (TCon label [u, v]) (TCon "Array" [w]) | u == w && v == w = Just $ JOp "toArray2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
     -- (t,t,t) -> [t]
-    go (TCon label [u, v, w]) (TCon "Array" [x]) | u == x && v == x && w == x = Just $ JOp "mkArray2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
+    go (TCon label [u, v, w]) (TCon "Array" [x]) | u == x && v == x && w == x = Just $ JOp "toArray2" [JOp (label ++ ".1") [e] u, JOp (label ++ ".2") [e] v] t
     -- (s,t) -> s
     go (TCon label [u, v]) t | u == t = Just $ JOp (label ++ ".1") [e] t
     -- (s,t) -> t
@@ -154,9 +154,7 @@ substVars :: [(String, JExp)] -> JExp -> JExp
 substVars s (JNew es t) = JNew (map (substVars s) es) t
 substVars s (JOp k es t) = JOp k (map (substVars s) es) t
 substVars s (JK k t) = JK k t
-substVars s (JVar x t) = case lookup x s of
-                          Just e -> e
-                          Nothing -> JVar x t
+substVars s (JVar x t) = fromMaybe (JVar x t) (lookup x s)
 
 -- Find the free variables of the expression.
 -- Find a factory method with matching arguments and matching name.
@@ -170,21 +168,21 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
 
   rs <- forM (factories skin) $ \k @ (JConstructor skinLabel skinFields skinSuper) -> do
 
-    theta <- do -- trace ("matching " ++ show k ++ " with " ++ show new) $ do
+    theta <-  -- trace ("matching " ++ show k ++ " with " ++ show new) $ do
       case (skinFields, fv) of
         -- HACK: if there are more parameter to the factory than there are free variables in
         -- the constructor call, try to tuple up the parameters
         ([(y1, t1'), (y2, t2')], [(x, TCon "List" [t])]) | t1' == t2' ->
-          case coerce hierarchy (JOp "mkList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) (TCon "List" [t]) of
-            Just e -> return $ [(x, e)]
+          case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) (TCon "List" [t]) of
+            Just e -> return [(x, e)]
             Nothing -> return []
         ([(y1, t1'), (y2, t2')], [(x, TCon "Array" [t])]) | t1' == t2' ->
-          case coerce hierarchy (JOp "mkArray2" [JVar y1 t1', JVar y2 t1'] (TCon "Array" [t1'])) (TCon "Array" [t]) of
-            Just e -> return $ [(x, e)]
+          case coerce hierarchy (JOp "toArray2" [JVar y1 t1', JVar y2 t1'] (TCon "Array" [t1'])) (TCon "Array" [t]) of
+            Just e -> return [(x, e)]
             Nothing -> return []
         ([(y1, t1'), (y2, t2')], [(x, t)]) | t1' == t2' ->
-          case coerce hierarchy (JOp "mkList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) t of
-            Just e -> return $ [(x, e)]
+          case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) t of
+            Just e -> return [(x, e)]
             Nothing -> return []
 
         (skinFields, fv) | length skinFields == length fv -> do
@@ -259,7 +257,7 @@ generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
 
         removeEnumVars ess = filter (not . hasEnumVars) ess
         hasEnumVars es = any isEnumVar es
-        isEnumVar ex = any (\e -> isThisEnumVar e ex) (jenums jast)
+        isEnumVar ex = any (`isThisEnumVar` ex) (jenums jast)
         isThisEnumVar (JEnum enum (TCon esuper [])) (JVar x (TCon label [])) | esuper == label = True
         isThisEnumVar _ _ = False
 
@@ -267,7 +265,7 @@ generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
         addEnum e ess = concatMap (addEnum1 e) ess
 
         addEnum1 :: JEnum -> [JExp] -> [[JExp]]
-        addEnum1 e es = nub $ (map (addEnum2 e) es) : es : []
+        addEnum1 e es = nub $ [map (addEnum2 e) es, es]
 
         addEnum2 :: JEnum -> JExp -> JExp
         addEnum2 (JEnum enum (TCon esuper [])) (JVar x (TCon label [])) | esuper == label = JK enum (TCon label [])
@@ -281,7 +279,7 @@ matchName skin = matchNameWithAliases (aliases skin)
 -- Also, it maps more than one skin type to the same JAST type, which may be broken
 matchTypes :: Monad m => Skin -> JAST -> m Skin
 matchTypes skin jast = do
-  debug $ "match types"
+  debug "match types"
   let is = interfaces skin
   let js = jinterfaces jast
   let match2 (j @ (JInterface label _)) (i @ (JInterface skinLabel _)) =
@@ -337,11 +335,11 @@ findAppropriateLhs skin e = "expression"
 
 -- Generate the RHS of a rule given the expression.
 generateRhs :: SubtypeEnv -> Skin -> JExp -> [(Sym, String)]
-generateRhs hierarchy skin (JNew es (TCon label [])) = [(Terminal (keyword label), "_")] ++ concatMap (generateRhs hierarchy skin) es
+generateRhs hierarchy skin (JNew es (TCon label [])) = (Terminal (makeKeyword skin label), "_") : concatMap (generateRhs hierarchy skin) es
 generateRhs hierarchy skin (JVar x t) = [(findLhsForType hierarchy skin t, x)]
 
-keyword :: String -> String
-keyword s = map toLower s
+makeKeyword :: Skin -> String -> String
+makeKeyword skin = map toLower
 
 findLhsForType :: SubtypeEnv -> Skin -> Type -> Sym
 findLhsForType hierarchy skin t =
@@ -362,121 +360,122 @@ translateAction Unit (TCon "void" []) = JK "{}" (TCon "void" [])
 translateAction (Var x) t = JVar x t
 translateAction (K k) t = JK k t
 translateAction (Op "Nothing") t = JK "null" t
-translateAction (Op "Nil") (TCon "List" [t]) = JK ("Collections.emptyList<" ++ (show t) ++ ">()") (TCon "List" [t])
+translateAction (Op "Nil") (TCon "List" [t]) = JK ("Collections.emptyList<" ++ show t ++ ">()") (TCon "List" [t])
 translateAction (Op "Nil") (TCon "Array" [t]) = JK ("new " ++ show t ++ "[0]") (TCon "Array" [t])
 translateAction (Op "Zero") (TCon "int" []) = JK "0" (TCon "int" [])
 translateAction (Op "Zero") (TCon "long" []) = JK "0L" (TCon "long" [])
 translateAction (Op "True") (TCon "boolean" []) = JK "true" (TCon "boolean" [])
 translateAction (Op "False") (TCon "boolean" []) = JK "false" (TCon "boolean" [])
-translateAction (App (App (Op ":") e1) (App (App (Op ":") e2) (Op "Nil"))) (TCon "List" [t]) = JOp "mkList2" [translateAction e1 t, translateAction e2 t] (TCon "List" [t])
+translateAction (App (App (Op ":") e1) (App (App (Op ":") e2) (Op "Nil"))) (TCon "List" [t]) = JOp "toList2" [translateAction e1 t, translateAction e2 t] (TCon "List" [t])
 translateAction e t = error $ "missing synth " ++ show e ++ " :: " ++ show t
+
+parseAndCheck p filename = do
+  r <- parseFromFile p filename
+  case r of
+    Left err ->
+      error $ "could not parse " ++ filename ++ ": " ++ show err
+    Right tree ->
+      return tree
 
 main :: IO ()
 main = do
   -- Parse arguments
   args <- getArgs
+
+  when (length args /= 2) $ error "usage: cat skin-file ast-file"
+
   let skinFile = head args
   let astFile = head (tail args)
 
   -- read the skin and the java AST files
-  skinput <- readFile $ skinFile
-  jinput <- readFile $ astFile
+  skin <- parseAndCheck skin skinFile
+  jast <- parseAndCheck javaAST astFile
 
-  -- parse the skin
-  case parse skin skinFile skinput of
-    Left err ->
-      debug $ "unparsable skin: " ++ show err
-    Right skin -> do
-      debug $ "skin: " ++ show skin
+  debug $ "skin: " ++ show skin
+  debug $ "Java AST:\n" ++ show jast
 
-      -- parse the java AST file
-      case parse javaAST "ast" jinput of
-        Left err ->
-          debug $ "unparsable java AST description: " ++ show err
-        Right jast -> do
-          debug $ "Java AST:\n" ++ show jast
+  typeCheckSkin skin
 
-          typeCheckSkin skin
+  -- match types between the skin and the JAST, rewriting the skin
+  -- to use the JAST types.
+  skin' <- matchTypes skin jast
+  debug $ "skin': " ++ show skin'
 
-          -- rename the types to match the JAST
-          skin' <- matchTypes skin jast
-          debug $ "skin': " ++ show skin'
+  -- Type-check again... This is just a sanity check that matchTypes didn't mess up the types
+  typeCheckSkin skin'
 
-          -- Type-check again.. This is just a sanity check that matchTypes didn't mess up the types
-          typeCheckSkin skin'
+  let hierarchy = generateHierarchy jast ++ generateSkinHierarchy skin'
 
-          let hierarchy = generateHierarchy jast ++ generateSkinHierarchy skin'
+  let jcalls = generateFactoryCalls jast
+  debug $ "jcalls:\n" ++ intercalate "\n" (map show jcalls)
 
-          let jcalls = generateFactoryCalls jast
-          debug $ "jcalls:\n" ++ intercalate "\n" (map show jcalls)
+  debug "Matching AST with skin:"
+  matchResults <- forM jcalls $ \k -> case k of
+    JNew args t ->
+      return $ runReader (matchConstructors k) (skin', hierarchy)
+    _ ->
+      return $ NoMatch k
 
-          debug $ "Matching AST with skin:"
-          matchResults <- forM jcalls $ \k -> case k of
-            JNew args t -> do
-              return $ runReader (matchConstructors k) (skin', hierarchy)
-            _ ->
-              return $ NoMatch k
+  forM_ matchResults print
 
-          forM matchResults $ putStrLn . show
+  -- For each unmatched constructor call, for each subexpression of the
+  -- call, make sure there is a grammar rule for that subexpression's type.
 
-          -- For each unmatched constructor call, for each subexpression of the
-          -- call, make sure there is a grammar rule for that subexpression's type.
-
-          -- newRules <- forM [e | NoMatch e <- matchResults] $ generateRulesForSubexpressions
+  -- newRules <- forM [e | NoMatch e <- matchResults] $ generateRulesForSubexpressions
 
 
-          -- For each matched factory method, generate a JRule that invokes the factory method.
-          -- Generate a JRule that invokes the factory method.
+  -- For each matched factory method, generate a JRule that invokes the factory method.
+  -- Generate a JRule that invokes the factory method.
 
-          let matchedRules = findRules skin [k | Match _ k e <- matchResults]
+  let matchedRules = findRules skin [k | Match _ k e <- matchResults]
 
-          -- For each unmatched constructor, generate a new factory method and generate a new rule that invokes that method.
+  -- For each unmatched constructor, generate a new factory method and generate a new rule that invokes that method.
 
-          newRules <- forM matchResults $ \r -> case r of
-            NoMatch e -> do
-              let lhs = findAppropriateLhs skin' e
-              let rhs = generateRhs hierarchy skin' e
-              let rule = JRule (typeof e) lhs rhs e
-              return $ Just rule
-            _ -> return Nothing
+  newRules <- forM matchResults $ \r -> case r of
+    NoMatch e -> do
+      let lhs = findAppropriateLhs skin' e
+      let rhs = generateRhs hierarchy skin' e
+      let rule = JRule (typeof e) lhs rhs e
+      return $ Just rule
+    _ -> return Nothing
 
-          forM matchedRules $ putStrLn . show
-          forM (catMaybes newRules) $ putStrLn . show
+  forM_ matchResults print
+  forM_ (catMaybes newRules) print
 
-          -- Need to prune the grammar.
-          -- Starting at root symbol ("goal")
-          -- eliminate rhs symbols that aren't covered by the factory calls
+  -- Need to prune the grammar.
+  -- Starting at root symbol ("goal")
+  -- eliminate rhs symbols that aren't covered by the factory calls
 
 {-
-          -- To synthesize a rule from a Java constructor:
-          -- First: rule placement (what's the LHS?)
-          -- Second: Syntax... "learn" the syntax for an Exp with a Type child, a Stm with a Exp child, etc.
+  -- To synthesize a rule from a Java constructor:
+  -- First: rule placement (what's the LHS?)
+  -- Second: Syntax... "learn" the syntax for an Exp with a Type child, a Stm with a Exp child, etc.
 
-          -- match the skin AST with the Java AST
-          let (cost, caseMatches, typeMatches) = matchConstructorsToSkinAST skin javaConstructors
-          debug $ "cost " ++ show cost
-          debug $ "case " ++ intercalate "\n" (map show caseMatches)
-          debug $ "type " ++ intercalate "\n" (map show typeMatches)
+  -- match the skin AST with the Java AST
+  let (cost, caseMatches, typeMatches) = matchConstructorsToSkinAST skin javaConstructors
+  debug $ "cost " ++ show cost
+  debug $ "case " ++ intercalate "\n" (map show caseMatches)
+  debug $ "type " ++ intercalate "\n" (map show typeMatches)
 
-          -- generate new rules
-          newRules <- generateNewRules javaConstructors caseMatches
-          debug $ "new rules = " ++ show newRules
+  -- generate new rules
+  newRules <- generateNewRules javaConstructors caseMatches
+  debug $ "new rules = " ++ show newRules
 
-          let simp (ctor, c) = [(ctor, c, TCon "void" [])]
-              modelMap = concatMap simp caseMatches
+  let simp (ctor, c) = [(ctor, c, TCon "void" [])]
+      modelMap = concatMap simp caseMatches
 
-          debug $ "new grammar"
+  debug "new grammar"
 
-          forM_ (rules skin ++ newRules) $ \(Rule t lhs rhs action) -> do
-              case synthFromModel action t modelMap of
-                Nothing -> return ()
-                Just x -> do
-                  debug $ "RULE"
-                  debug $ "  " ++ lhs ++ " ::= " ++ show rhs
-                  debug $ "  " ++ show action ++ " :: " ++ show t
-                  debug $ "  " ++ x
+  forM_ (rules skin ++ newRules) $ \(Rule t lhs rhs action) -> do
+      case synthFromModel action t modelMap of
+        Nothing -> return ()
+        Just x -> do
+          debug $ "RULE"
+          debug $ "  " ++ lhs ++ " ::= " ++ show rhs
+          debug $ "  " ++ show action ++ " :: " ++ show t
+          debug $ "  " ++ x
 -}
 
-          let skin'' = skin { rules = removeUnreachableRules (rules skin') }
+  let skin'' = skin { rules = removeUnreachableRules (rules skin') }
 
-          return ()
+  return ()
