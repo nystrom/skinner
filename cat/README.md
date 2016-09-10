@@ -2,6 +2,8 @@
 
 To build:
 
+    brew install glpk
+
     cd cat
     cabal install --dependencies-only
     cabal configure
