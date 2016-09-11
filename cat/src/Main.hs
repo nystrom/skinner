@@ -237,7 +237,7 @@ subtype env t1 t2 = case supertype env t1 of
                    Just t -> subtype env t t2
 
 generateHierarchy :: JAST -> SubtypeEnv
-generateHierarchy jast = []
+generateHierarchy jast = [(TCon label [], super) | JInterface label super <- jinterfaces jast]
 
 generateSkinHierarchy :: Skin -> SubtypeEnv
 generateSkinHierarchy skin = []
@@ -276,7 +276,11 @@ matchName skin = matchNameWithAliases (aliases skin)
 
 -- match types in the skin to types in the JAST, rewriting the skin
 -- FIXME: currently this works by matching names using only aliases with no forgiveness
--- Also, it maps more than one skin type to the same JAST type, which may be broken
+-- Also, it maps more than one skin type to the same JAST type, which may be broken (but might not be...)
+-- Should, for instance, map both skin Stm and Exp to JAST Expr.
+-- TODO: map unmapped types to Void and prune the actions and collapse types.
+-- Thus, for an untyped language, want to map Formal to (Type,String) to (void,String) to String.
+-- Mapping should perform coercions too... we should combine all this with the factory/constructor mapping.
 matchTypes :: Monad m => Skin -> JAST -> m Skin
 matchTypes skin jast = do
   debug "match types"
