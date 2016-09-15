@@ -1,5 +1,7 @@
+abstract class Declaration extends Object
+class Method(String id, String[] params, Expression body) extends Declaration
+
 abstract class Expression extends Object
-class Method(String id, String[] params, Expression body) extends Expression
 class BinExp(BinaryOp op, Expression left, Expression right) extends Expression
 class AssocExp(AssocOp op, Expression[] es) extends Expression
 class Value(int value) extends Expression

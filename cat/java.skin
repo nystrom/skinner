@@ -50,7 +50,8 @@ alias dimensions dims
 alias dimension dim
 alias modifier mod flag
 alias lazy on_demand
-alias variable var identifier name
+alias variable var name
+alias identifier ident id name
 alias parameter param variable local_variable argument
 alias actual argument
 alias formal formal_parameter
