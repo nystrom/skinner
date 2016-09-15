@@ -10,7 +10,8 @@ data Skin = Skin {
   tokens :: [(String, Type)],
   aliases :: [[String]],
   templates :: [Template],
-  rules :: [Rule]
+  rules :: [Rule],
+  jrules :: [JRule]
 } deriving Show
 
 data JAST = JAST {
@@ -66,21 +67,17 @@ data JRule = JRule Type String [(Sym, String)] JExp
 data Template = Template Type Type [(Sym, String)]
   deriving (Show, Eq)
 
-data Exp = App Exp Exp
-         | Var String
-         | Op String
-         | K String
-         | Unit
+data Exp = Var String
+         | Op String [Exp]
+         | K String [Exp]
   deriving (Eq, Ord)
 
 instance Show Exp where
-  show (App e1 e2 @ (App _ _)) = show e1 ++ " (" ++ show e2 ++ ")"
-  show (App (App (Op ":") e1) e2) = show e1 ++ ":" ++ show e2
-  show (App e1 e2) = show e1 ++ " " ++ show e2
+  show (Op ":" [e1, e2]) = show e1 ++ ":" ++ show e2
+  show (Op "++" [e1, e2]) = show e1 ++ " ++ " ++ show e2
+  show (Op x es) = x ++ " (" ++ intercalate ", " (map show es) ++ ")"
   show (Var x) = x
-  show (Op x) = x
-  show (K k) = k
-  show Unit = "()"
+  show (K k es) = k ++ " (" ++ intercalate ", " (map show es) ++ ")"
 
 data JExp = JNew [JExp] Type
           | JOp String [JExp] Type
@@ -93,6 +90,12 @@ instance Show JExp where
   show (JOp op es t) = op ++ "(" ++ intercalate ", " (map show es) ++ ")" ++ " :: " ++ show t
   show (JK k t) = k ++ " :: " ++ show t
   show (JVar x t) = x ++ " :: " ++ show t
+
+typeof :: JExp -> Type
+typeof (JNew es t) = t
+typeof (JOp op es t) = t
+typeof (JK k t) = t
+typeof (JVar x t) = t
 
 data Sym = Nonterminal String | Terminal String
   deriving (Show, Eq, Ord)

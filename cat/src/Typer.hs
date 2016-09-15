@@ -5,7 +5,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 
 import Data.Char (isUpper, isLower)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, isNothing)
 import Data.List ((\\))
 
 import qualified Data.Map as M
@@ -43,6 +43,23 @@ data Env = Env { tyenv :: M.Map String Type }
 
 type EnvT = ReaderT Env
 type ConstraintsT = StateT TCRec
+
+-- Mapping from type variables to types
+type Subst = [(Tyvar, Type)]
+
+merge :: Subst -> Subst -> Subst
+merge s1 s2 = s1' ++ s2'
+  where
+    s1' = concatMap (\(x,t1) -> case lookup x s2 of { Just t2 -> mgu t1 t2 ; Nothing -> [(x,t1)] }) s1
+    s2' = [(x,t) | (x,t) <- s2, isNothing (lookup x s1)]
+
+    mgu (TCon a as) (TCon b bs) | a == b = concat $ zipWith mgu as bs
+    mgu (TVar a) (TVar b) | a == b = []
+    mgu (TVar a) (TVar b) | a < b  = [(a,TVar b)]
+    mgu (TVar a) (TVar b) | b < a  = [(b,TVar a)]
+    mgu (TVar a) t                 = [(a,t)]
+    mgu t (TVar a)                 = [(a,t)]
+    mgu t t'                       = error $ "cannot unify " ++ show t ++ " and " ++ show t'
 
 -- Type checking monad
 type TC = ConstraintsT (EnvT Identity)
@@ -89,85 +106,89 @@ addTyConstraint c = do
 
 -- runTC :: [Constructor] -> TC a -> (a, [Constraint])
 -- runTC :: Monad m => [Constructor] -> TC a -> m (a, TCRec)
-runTC :: TC a -> [Constraint]
-runTC m = constraints endState
+runTC :: TC a -> (a, [Constraint])
+runTC m = (x, constraints endState)
   where
-    (_, endState) = runIdentity $ runReaderT (runStateT m st) env
+    (x, endState) = runIdentity $ runReaderT (runStateT m st) env
     env = Env { tyenv = M.empty }
     st = TCRec { nextTyvar = 0, constraints = [] }
 
-typeCheck :: Exp -> TC Type
-typeCheck (Op "++") = do
+typeCheck :: Exp -> TC JExp
+typeCheck (Op "++" [e1,e2]) = do
   a <- freshTyvar
-  return $ funType (TCon "List" [TVar a]) (funType (TCon "List" [TVar a])
-                                                  (TCon "List" [TVar a]))
-typeCheck (Op ":") = do
+  e1' <- typeCheck e1
+  e2' <- typeCheck e2
+  addTyConstraint (EqConstraint (show e1) (typeof e1') (TCon "List" [TVar a]))
+  addTyConstraint (EqConstraint (show e2) (typeof e2') (TCon "List" [TVar a]))
+  return (JOp "++" [e1', e2'] (typeof e2'))
+typeCheck (Op ":" [e1,e2]) = do
   a <- freshTyvar
-  return $ funType (TVar a) (funType (TCon "List" [TVar a]) (TCon "List" [TVar a]))
-typeCheck (Op "Nil") = do
+  e1' <- typeCheck e1
+  e2' <- typeCheck e2
+  addTyConstraint (EqConstraint (show e1) (typeof e1') (TVar a))
+  addTyConstraint (EqConstraint (show e2) (typeof e2') (TCon "List" [TVar a]))
+  return (JOp ":" [e1',e2'] (typeof e2'))
+typeCheck (K "Nil" []) = do
   a <- freshTyvar
-  return $ TCon "List" [TVar a]
-typeCheck (Op "Nothing") = do
+  return $ JK "Nil" (TCon "List" [TVar a])
+typeCheck (K "Nothing" []) = do
   a <- freshTyvar
-  return $ TCon "Maybe" [TVar a]
-typeCheck (Op "Just") = do
+  return $ JK "Nothing" (TCon "Maybe" [TVar a])
+typeCheck (K "Just" [e1]) = do
   a <- freshTyvar
-  return $ funType (TVar a) (TCon "Maybe" [TVar a])
-typeCheck (Op "True") = do
-  return $ TCon "Boolean" []
-typeCheck (Op "False") = do
-  return $ TCon "Boolean" []
-typeCheck (Op "Zero") = do
-  return $ TCon "Nat" []
-typeCheck (Op "Succ") = do
-  return $ funType (TCon "Nat" []) (TCon "Nat" [])
-typeCheck Unit = do
-  return $ TCon "()" []
-typeCheck (App e1 e2) = do
+  e1' <- typeCheck e1
+  return $ JOp "Just" [e1'] (TCon "Maybe" [typeof e1'])
+typeCheck (K "True" []) =
+  return $ JK "True" (TCon "Boolean" [])
+typeCheck (K "False" []) =
+  return $ JK "False" (TCon "Boolean" [])
+typeCheck (K "()" []) =
+  return $ JK "()" (TCon "()" [])
+typeCheck (K k []) = do
+  t <- lookupVar k
+  return $ JK k t
+typeCheck (K k es) = do
   a <- freshTyvar
-  t1 <- typeCheck e1
-  t2 <- typeCheck e2
-  addTyConstraint (EqConstraint (show $ App e1 e2) t1 (funType t2 (TVar a)))
-  return $ TVar a
-typeCheck (K k) = do
-  lookupVar k
+  es' <- mapM typeCheck es
+  let ts = map typeof es'
+  -- addTyConstraint (EqConstraint (show $ K k es) t (foldr funType (TVar a) ts))
+  return $ JNew es' (TCon k [])
 typeCheck (Var x) = do
-  lookupVar x
-typeCheck e = do
-  trace ("missing case " ++ (show e)) return ()
-  a <- freshTyvar
-  return $ TVar a
+  t <- lookupVar x
+  return $ JVar x t
+typeCheck e =
+  error $ "missing case " ++ show e
 
 typeCheckRules tokens factories rules = do
-  bindings <- forM rules $ \(Rule t lhs rhs action) -> do
+  bindings <- forM rules $ \(Rule t lhs rhs action) ->
     return (lhs, t)
 
-  tokenBindings <- forM tokens $ \(name, t) -> do
+  tokenBindings <- forM tokens $ \(name, t) ->
     return (name, t)
 
-  typeBindings <- forM factories $ \(JConstructor label children super) -> do
+  typeBindings <- forM factories $ \(JConstructor label children super) ->
     return (label, funType' (map snd children) super)
 
-  local (addBindings $ typeBindings ++ bindings ++ tokenBindings) $
-    forM_ rules $ \(Rule tlhs lhs rhs action) -> do
+  jrules <- local (addBindings $ typeBindings ++ bindings ++ tokenBindings) $
+    forM rules $ \(Rule tlhs lhs rhs action) ->
       local (rhsBindings rhs) $ do
-        t <- typeCheck action
-        addTyConstraint (EqConstraint lhs tlhs t)
-        return ()
+        e' <- typeCheck action
+        addTyConstraint (EqConstraint lhs tlhs (typeof e'))
+        return $ JRule tlhs lhs rhs e'
 
   rec <- get
-  put $ rec { constraints = unify (constraints rec) ++ map (\(x,t) -> AscribeConstraint x t) bindings }
+  put $ rec { constraints = unify (constraints rec) ++ map (uncurry AscribeConstraint) bindings }
 
   rec <- get
   put $ rec { constraints = filter (not . useless) (constraints rec) }
 
-  return ()
+  return jrules
 
-typeCheckSkin :: Skin -> IO ()
+typeCheckSkin :: Skin -> IO Skin
 typeCheckSkin skin = do
   -- Type check the rules in the grammar rules
-  let _ = runTC $ typeCheckRules (tokens skin) (factories skin) (rules skin)
-  return ()
+  let (jrules', _) = runTC $ typeCheckRules (tokens skin) (factories skin) (rules skin)
+  return skin { jrules = jrules' }
 
 useless :: Constraint -> Bool
 useless (EqConstraint _ t1 t2)
@@ -179,8 +200,8 @@ unify :: [Constraint] -> [Constraint]
 unify (EqConstraint m (TVar (Tyvar x1)) t2:constraints) = unify $ map (substCon x1 t2) constraints
 unify (EqConstraint m t2 (TVar (Tyvar x1)):constraints) = unify $ map (substCon x1 t2) constraints
 unify (c @ (EqConstraint m (TCon k1 ts1) (TCon k2 ts2)):constraints)
-  | k1 == k2 && length ts1 == length ts2 = unify $ zipWith (\t1 t2 -> EqConstraint m t1 t2) ts1 ts2 ++ constraints
-  | otherwise = (FailedConstraint ("cannot unify " ++ k1 ++ " and " ++ k2) c):unify constraints
+  | k1 == k2 && length ts1 == length ts2 = unify $ zipWith (EqConstraint m) ts1 ts2 ++ constraints
+  | otherwise = FailedConstraint ("cannot unify " ++ k1 ++ " and " ++ k2) c:unify constraints
 unify (c:constraints) = c:unify constraints
 unify [] = []
 

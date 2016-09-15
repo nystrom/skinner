@@ -42,7 +42,8 @@ skin = do
                   tokens = tokens,
                   aliases = aliases,
                   templates = templates,
-                  rules = concat rules }
+                  rules = concat rules,
+                  jrules = [] }
 
 token :: Parser (String, Type)
 token = reserved "token" *> do { t <- name; n <- name; return (n, TCon t []) }
@@ -104,32 +105,27 @@ action = do
 
 expression :: Parser Exp
 expression = try $ cons `chainr1`
-  (do { punct "++"; return (\x y -> App (App (Op "++") x) y) })
+  (do { punct "++"; return (\x y -> Op "++" [x, y]) })
 
 cons :: Parser Exp
-cons = try $ application `chainr1`
-  (do { punct ":"; return (\x y -> App (App (Op ":") x) y) })
+cons = try $ primary `chainr1`
+  (do { punct ":"; return (\x y -> Op ":" [x, y]) })
 
 application :: Parser Exp
 application = try $ do
-  e <- primary
-  es <- many primary
-  return $ foldl App e es
+  x <- name
+  case x of
+    "Nil" -> return $ K "Nil" []
+    "Nothing" -> return $ K "Nothing" []
+    "True" -> return $ K "True" []
+    "False" -> return $ K "False" []
+    x @ (y:_) | isUpper y -> do
+      es <- many primary
+      return $ K x es
+    x -> return $ Var x
 
 primary :: Parser Exp
-primary = try (nameExp <|> list expressions <|> tuple expressions)
-
-nameExp :: Parser Exp
-nameExp = try $ do
-  x <- name
-  return $ case x of
-    "Nil" -> Op "Nil"
-    "Nothing" -> Op "Nothing"
-    "Just" -> Op "Just"
-    "True" -> Op "True"
-    "False" -> Op "False"
-    x | isUpper $ head x -> K x
-    x -> Var x
+primary = try (application <|> list expressions <|> tuple expressions)
 
 number :: Parser Int
 number = read <$> many1 digit <* ws
@@ -142,7 +138,7 @@ list p = do
   punct "["
   r <- p
   punct "]"
-  return $ foldr (\x y -> App (App (Op ":") x) y) (Op "Nil") r
+  return $ foldr (\x y -> Op ":" [x, y]) (K "Nil" []) r
 
 tuple :: Parser [Exp] -> Parser Exp
 tuple p = do
@@ -150,10 +146,10 @@ tuple p = do
   r <- p
   punct ")"
   case r of
-    [] -> return Unit
-    (x:[]) -> return x
-    (x:y:[]) -> return $ App (App (Op "(,)") x) y
-    (x:y:z:[]) -> return $ App (App (App (Op "(,,)") x) y) z
+    [] -> return $ K "()" []
+    [x] -> return x
+    [x,y] -> return $ Op "(,)" [x,y]
+    [x,y,z] -> return $ Op "(,,)" [x,y,z]
     _ -> error "tuples larger than 3 not supported"
 
 term :: Parser (Sym, String)
