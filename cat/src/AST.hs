@@ -100,6 +100,10 @@ typeof (JVar x t) = t
 data Sym = Nonterminal String | Terminal String
   deriving (Show, Eq, Ord)
 
+symname :: Sym -> String
+symname (Nonterminal x) = x
+symname (Terminal x) = x
+
 instance Ord Rule where
   compare (Rule t1 lhs1 rhs1 _) (Rule t2 lhs2 rhs2 _) =
     (lhs1 `compare` lhs2) `mappend` (rhs1 `compare` rhs2)
