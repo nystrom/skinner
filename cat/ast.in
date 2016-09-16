@@ -1,3 +1,6 @@
+abstract class Program extends Object
+class Program(Declaration[] decls) extends Program
+
 abstract class Declaration extends Object
 class Method(String id, String[] params, Expression body) extends Declaration
 

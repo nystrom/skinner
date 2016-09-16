@@ -122,7 +122,7 @@ data Exp = IntLit int
         | XorAssign Exp Exp
         | OrAssign Exp Exp
         | ArrayInit [Exp]
-        | NameExp Name
+        | Var Identifier
 
 data Type = BooleanType
         | ByteType
@@ -270,6 +270,8 @@ Type primitive_type ::=
             { a }
     |   "boolean"
             { BooleanType }
+    |   "void"
+            { VoidType }
     ;
 Type numeric_type::=
         integral_type:a
@@ -521,10 +523,6 @@ Decl method_declaration ::=
                 formal_parameter_list_opt:d ")" dims_opt:e throws_opt:f
                         method_body:g
             { MethodDecl a b e c d f g }
-    |   modifiers_opt:a "void" ident:c "("
-                formal_parameter_list_opt:d ")" throws_opt:f
-                        method_body:g
-            { MethodDecl a VoidType Zero c d f g }
     ;
 [Formal] formal_parameter_list_opt ::=
             { [] }
@@ -629,7 +627,7 @@ ClassBody interface_body ::=
             { a : b }
     ;
 Decl interface_member_declaration ::=
-        constant_declaration:a
+        field_declaration:a
             { a }
     |   abstract_method_declaration:a
             { a }
@@ -638,17 +636,10 @@ Decl interface_member_declaration ::=
     |   interface_declaration:a
             { a }
     ;
-Decl constant_declaration ::=
-        field_declaration:a
-            { a }
-    ;
 Decl abstract_method_declaration ::=
         modifiers_opt:a type:b ident:c "("
                 formal_parameter_list_opt:d ")" dims_opt:e throws_opt:f ";"
             { MethodDecl a b e c d f Nothing }
-    |   modifiers_opt:a "void" ident:c "("
-                formal_parameter_list_opt:d ")" throws_opt:f ";"
-            { MethodDecl a VoidType Zero c d f Nothing }
     ;
 Exp array_initializer ::=
         "{" variable_initializers:a "," "}"
@@ -802,7 +793,7 @@ Stm switch_statement ::=
             { a ++ [b] }
     ;
 Stm switch_label ::=
-        "case" constant_expression:a ":"
+        "case" expression:a ":"
             { Case (Just a) }
     |   "default" ":"
             { Case Nothing }
@@ -911,8 +902,12 @@ Exp primary ::=
 Exp primary_no_new_array ::=
         literal:a
             { a }
+    |   name_expr:a
+            { Var a }
     |   "this"
             { This Nothing }
+    |   type:a "." "this"
+            { This (Just a) }
     |   "(" expression:a ")"
             { a }
     |   class_instance_creation_expression:a
@@ -925,10 +920,6 @@ Exp primary_no_new_array ::=
             { a }
     |   type:a "." "class"
             { ClassLit a }
-    |   "void" "." "class"
-            { ClassLit VoidType }
-    |   type:a "." "this"
-            { This (Just a) }
     ;
 Exp class_instance_creation_expression ::=
         "new" name_type:a "(" argument_list_opt:b ")"
@@ -938,10 +929,6 @@ Exp class_instance_creation_expression ::=
     |   primary:a "." "new" ident:b "(" argument_list_opt:c ")"
             { QualifiedNew a b c Nothing }
     |   primary:a "." "new" ident:b "(" argument_list_opt:c ")" class_body:d
-            { QualifiedNew a b c (Just d) }
-    |   name_expr:a "." "new" ident:b "(" argument_list_opt:c ")"
-            { QualifiedNew a b c Nothing }
-    |   name_expr:a "." "new" ident:b "(" argument_list_opt:c ")" class_body:d
             { QualifiedNew a b c (Just d) }
     ;
 [Exp] argument_list_opt ::=
@@ -997,8 +984,6 @@ Exp field_access ::=
 Exp method_invocation ::=
         ident:a "(" argument_list_opt:b ")"
             { Call Nothing a b }
-    |   name:p DOT ident:a "(" argument_list_opt:b ")"
-            { Call (Just (NameExp p)) a b }
     |   primary:a "." ident:b "(" argument_list_opt:c ")"
             { Call (Just a) b c }
     |   "super" "." ident:b "(" argument_list_opt:c ")"
@@ -1007,15 +992,11 @@ Exp method_invocation ::=
             { Call (Just (Super (Just a))) b c }
     ;
 Exp array_access ::=
-        name_expr:a "[" expression:b "]"
-            { ArrayAccess a b  }
-    |   primary_no_new_array:a "[" expression:b "]"
+        primary_no_new_array:a "[" expression:b "]"
             { ArrayAccess a b }
     ;
 Exp postfix_expression ::=
         primary:a
-            { a }
-    |   name_expr:a
             { a }
     |   postincrement_expression:a
             { a }
@@ -1184,7 +1165,7 @@ Exp assignment ::=
     ;
 Exp name_expr ::=
         name:a
-            { NameExp a }
+            { Var a }
     ;
 Exp left_hand_side ::=
         name_expr:a
@@ -1201,10 +1182,6 @@ Exp left_hand_side ::=
     ;
 Exp expression ::=
         assignment_expression:a
-            { a }
-    ;
-Exp constant_expression ::=
-        expression:a
             { a }
     ;
 Identifier ident ::=

@@ -292,6 +292,7 @@ subtype env t1 t2 = case supertype env t1 of
 
 generateHierarchy :: JAST -> SubtypeEnv
 generateHierarchy jast = [(TCon label [], super) | JInterface label super <- jinterfaces jast]
+                       ++ [(TCon label [], super) | JConstructor label _ super <- jconstructors jast]
 
 generateSkinHierarchy :: Skin -> SubtypeEnv
 generateSkinHierarchy skin = []
