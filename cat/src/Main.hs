@@ -460,30 +460,25 @@ findLhsForType hierarchy t = do
                       TCon "String" [] -> return $ Terminal "IDENTIFIER"
                       TCon "int" [] -> return $ Terminal "INT_LITERAL"
                       TCon "Array" [a] -> do
-                        token <- findLhsForType hierarchy a
-                        let lp = (Terminal "(", "_")
-                        let rp = (Terminal ")", "_")
-                        let name = symname token ++ "_list"
-                        let list = (Nonterminal name, "as")
-                        let one = (token, "a")
-                        let comma = (Terminal ",", "_")
-                        let rule0 = JRule a name [] (JOp "listToArray" [JK "Nil" (TCon "List" [a])] (TCon "Array" [a]))
-                        let rule1 = JRule a name [one, comma, list] (JOp "listToArray" [JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a])] (TCon "Array" [a]))
-                        let rule = JRule t name [lp, list, rp] (JVar "as" t)
-                        modify (\skin -> skin { jrules = rule0 : rule1 : rule : jrules skin })
+                        list <- findLhsForType hierarchy (TCon "List" [a])
+                        let name = symname list ++ "_array"
+                        let rule = JRule t name [(list, "as")] (JOp "listToArray" [JVar "as" (TCon "List" [a])] t)
+                        modify (\skin -> skin { jrules = rule : jrules skin })
                         return $ Nonterminal name
                       TCon "List" [a] -> do
                         token <- findLhsForType hierarchy a
                         let lp = (Terminal "(", "_")
                         let rp = (Terminal ")", "_")
-                        let name = symname token ++ "_list"
-                        let list = (Nonterminal name, "as")
+                        let listName = symname token ++ "_list"
+                        let name = symname token ++ "_list_brackets"
+                        let list = (Nonterminal listName, "as")
                         let one = (token, "a")
                         let comma = (Terminal ",", "_")
-                        let rule0 = JRule a name [] (JK "Nil" (TCon "List" [a]))
-                        let rule1 = JRule a name [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
-                        let rule = JRule t name [lp, list, rp] (JVar "as" t)
-                        modify (\skin -> skin { jrules = rule0 : rule1 : rule : jrules skin })
+                        let rule1 = JRule (TCon "List" [a]) listName [one] (JOp ":" [JVar "a" a, JK "Nil" (TCon "List" [a])] (TCon "List" [a]))
+                        let rule2 = JRule (TCon "List" [a]) listName [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
+                        let rule3 = JRule t name [lp, list, rp] (JVar "as" t)
+                        let rule4 = JRule t name [lp, rp] (JK "Nil" t)
+                        modify (\skin -> skin { jrules = rule1 : rule2 : rule3 : rule4 : jrules skin })
                         return $ Nonterminal name
                       t -> do
                         -- if the type is builtin, generate rules for that type (arrays and lists and maybe)
