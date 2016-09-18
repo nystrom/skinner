@@ -8,6 +8,7 @@ import           Data.List            (find, intercalate, minimum, minimumBy,
                                        nub, sortBy, sortOn, (\\))
 import           Data.Maybe           (catMaybes, fromMaybe, listToMaybe)
 import           Data.Monoid
+import           Data.Tuple           (swap)
 import           Debug.Trace          (trace)
 import           System.Environment   (getArgs)
 import           Text.Parsec          (parse)
@@ -41,6 +42,7 @@ instance Wordy JExp where
   toBagOfWords (JVar x t)    = toBagOfWords t    -- NOTE: do not include the variable name
 
 instance Wordy Type where
+  toBagOfWords (TCon label []) = [label]
   toBagOfWords (TCon label []) = [label]
   toBagOfWords _               = []
 
@@ -192,8 +194,8 @@ coerce hierarchy e t = go (typeof e) t
 
     -- K u -> K t -> t
     go (TCon label [u]) t = case coerce hierarchy e (TCon label [t]) of
-                              Just e  -> coerce hierarchy e t
-                              Nothing -> Nothing
+                                Just e  -> coerce hierarchy e t
+                                Nothing -> Nothing
 {-
     -- s -> K s -> K t
     go s (TCon label [w]) = case coerce hierarchy e (TCon label [s]) of
@@ -355,8 +357,12 @@ matchTypes skin jast = do
     substSkin s skin = skin { interfaces = substInterfaces s (interfaces skin),
                               factories = substCtors s (factories skin),
                               rules = substRules s (rules skin),
-                              jrules = substJRules s (jrules skin),
-                              tokens = substTokens s (tokens skin) }
+                              tokens = substTokens s (tokens skin),
+                              templates = substTemplates s (templates skin) }
+
+
+    substTemplates s js = map (substTemplate s) js
+    substTemplate s (Template t1 t2 rhs action) = Template (substType s t1) (substType s t2) rhs action
 
     substTokens s js = map (substToken s) js
     substToken s (x, t) = (x, substType s t)
@@ -370,12 +376,10 @@ matchTypes skin jast = do
     substRules s js = map (substRule s) js
     substRule s (Rule typ label rhs e) = Rule (substType s typ) label rhs e
 
-    substJRules s js = map (substJRule s) js
-    substJRule s (JRule typ label rhs e) = JRule (substType s typ) label rhs e
-
     substFields s fields = map (substField s) fields
     substField s (x,t) = (x, substType s t)
 
+    substType s (TCon label ts) = TCon (substLabel s label) (map (substType s) ts)
     substType s (TCon label ts) = TCon (substLabel s label) (map (substType s) ts)
     substType s (TVar x) = TVar x
 
@@ -384,7 +388,7 @@ matchTypes skin jast = do
       | label == old = new
       | otherwise    = substLabel rest label
 
-removeUnreachableRules :: [JRule] -> [JRule]
+removeUnreachableRules :: [Rule] -> [Rule]
 removeUnreachableRules rules = rules  -- remove rules unreachable from the start symbol
                                       -- TODO TODO TODO
 
@@ -392,10 +396,10 @@ data MatchResult = Match Int JConstructor JExp
                  | NoMatch JExp
   deriving Show
 
-findRules :: Skin -> [JConstructor] -> [JRule]
-findRules skin ks = filter (ruleInvokes ks) (jrules skin)
+findRules :: Skin -> [JConstructor] -> [Rule]
+findRules skin ks = filter (ruleInvokes ks) (rules skin)
   where
-    ruleInvokes ks (JRule t lhs rhs e) = expInvokes ks e
+    ruleInvokes ks (Rule t lhs rhs e) = expInvokes ks e
 
     expInvokes ks (JVar x t)    = True
     expInvokes ks (JK k t)      = True
@@ -418,9 +422,12 @@ findRules skin ks = filter (ruleInvokes ks) (jrules skin)
     matches t _ | isPrimitive t = True
     matches (TCon label []) ks = any (\(JConstructor label' _ _) -> label == label') ks
 
+data Variance = Subtype | Supertype
+  deriving (Show, Eq)
+
 -- Find an appropriate LHS for the given expression.
 findAppropriateLhs :: SubtypeEnv -> JExp -> State Skin Sym
-findAppropriateLhs hierarchy e = findLhsForType hierarchy (typeof e)
+findAppropriateLhs hierarchy e = findLhsForType Supertype hierarchy (typeof e)
 
   -- find rules with similar types
   -- Method should map to "declaration"
@@ -428,13 +435,14 @@ findAppropriateLhs hierarchy e = findLhsForType hierarchy (typeof e)
   -- to allow arbitrary declarations at any level.
 
 -- Generate the RHS of a rule given the expression.
+-- TODO: add parent type for generating template
 generateRhs :: SubtypeEnv -> JExp -> State Skin [(Sym, String)]
 generateRhs hierarchy (JNew es (TCon label [])) = do
   k <- makeKeyword label
   rhs <- mapM (generateRhs hierarchy) es
   return $ (Terminal k, "_") : concat rhs
 generateRhs hierarchy (JVar x t) = do
-  lhs <- findLhsForType hierarchy t
+  lhs <- findLhsForType Subtype hierarchy t
   return [(lhs, x)]
 
 makeKeyword :: String -> State Skin String
@@ -443,12 +451,12 @@ makeKeyword s = do
   modify (\skin -> skin { tokens = nub $ (k, TCon "void" []) : tokens skin })
   return k
 
-findLhsForType :: SubtypeEnv -> Type -> State Skin Sym
-findLhsForType hierarchy t = do
-  rs <- gets jrules
+findLhsForType :: Variance -> SubtypeEnv -> Type -> State Skin Sym
+findLhsForType variance hierarchy t = do
+  rs <- gets rules
   ts <- gets tokens
-  let rulesWithRightType = filter (\(JRule rt _ _ _) -> subtype hierarchy rt t) rs
-  let lhss = nub $ map (\(JRule _ lhs _ _) -> lhs) (trace (show rs) rulesWithRightType)
+  let rulesWithRightType = filter (\(Rule rt _ _ _) -> subtype hierarchy rt t) rs
+  let lhss = nub $ map (\(Rule _ lhs _ _) -> lhs) (trace (show rs) rulesWithRightType)
   let tokensWithRightType = nub $ filter (\(x, rt) -> subtype hierarchy rt t) ts
   let token = fmap fst (listToMaybe tokensWithRightType)
   case lhss of
@@ -456,17 +464,17 @@ findLhsForType hierarchy t = do
     [] -> case token of
       Just token -> return $ Terminal token
       Nothing    -> case t of
-                      TCon "Object" [] -> return $ Terminal "IDENTIFIER"
+                      -- TCon "Object" [] -> return $ Terminal "IDENTIFIER"
                       TCon "String" [] -> return $ Terminal "IDENTIFIER"
                       TCon "int" [] -> return $ Terminal "INT_LITERAL"
                       TCon "Array" [a] -> do
-                        list <- findLhsForType hierarchy (TCon "List" [a])
+                        list <- findLhsForType variance hierarchy (TCon "List" [a])
                         let name = symname list ++ "_array"
-                        let rule = JRule t name [(list, "as")] (JOp "listToArray" [JVar "as" (TCon "List" [a])] t)
-                        modify (\skin -> skin { jrules = rule : jrules skin })
+                        let rule = Rule t name [(list, "as")] (JOp "listToArray" [JVar "as" (TCon "List" [a])] t)
+                        modify (\skin -> skin { rules = rule : rules skin })
                         return $ Nonterminal name
                       TCon "List" [a] -> do
-                        token <- findLhsForType hierarchy a
+                        token <- findLhsForType variance hierarchy a
                         let lp = (Terminal "(", "_")
                         let rp = (Terminal ")", "_")
                         let listName = symname token ++ "_list"
@@ -474,20 +482,27 @@ findLhsForType hierarchy t = do
                         let list = (Nonterminal listName, "as")
                         let one = (token, "a")
                         let comma = (Terminal ",", "_")
-                        let rule1 = JRule (TCon "List" [a]) listName [one] (JOp ":" [JVar "a" a, JK "Nil" (TCon "List" [a])] (TCon "List" [a]))
-                        let rule2 = JRule (TCon "List" [a]) listName [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
-                        let rule3 = JRule t name [lp, list, rp] (JVar "as" t)
-                        let rule4 = JRule t name [lp, rp] (JK "Nil" t)
-                        modify (\skin -> skin { jrules = rule1 : rule2 : rule3 : rule4 : jrules skin })
+                        let rule1 = Rule (TCon "List" [a]) listName [one] (JOp ":" [JVar "a" a, JK "Nil" (TCon "List" [a])] (TCon "List" [a]))
+                        let rule2 = Rule (TCon "List" [a]) listName [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
+                        let rule3 = Rule t name [lp, list, rp] (JVar "as" t)
+                        let rule4 = Rule t name [lp, rp] (JK "Nil" t)
+                        modify (\skin -> skin { rules = rule1 : rule2 : rule3 : rule4 : rules skin })
                         return $ Nonterminal name
-                      t -> do
-                        -- if the type is builtin, generate rules for that type (arrays and lists and maybe)
-                        -- if the type is not builtin, just return a new Nonterminal
-                        -- error $ "missing case " ++ show t
-                        trace ("hierarchy = " ++ show hierarchy) $
-                          case lookup t hierarchy of
-                            Just s -> findLhsForType hierarchy s
-                            Nothing -> error $ "missing case " ++ show t
+                      t -> case variance of
+                        Subtype -> do
+                          -- if the type is builtin, generate rules for that type (arrays and lists and maybe)
+                          -- if the type is not builtin, just return a new Nonterminal
+                          -- error $ "missing case " ++ show t
+                          trace ("hierarchy = " ++ show hierarchy) $
+                            case lookup t hierarchy of
+                              Just s  -> findLhsForType Subtype hierarchy s
+                              Nothing -> error $ "missing case " ++ show t
+                        Supertype -> do
+                          -- FIXME
+                          trace ("hierarchy = " ++ show hierarchy) $
+                            case map fst $ filter (\(t1,t2) -> t2 == t) hierarchy of
+                              (s:_) -> findLhsForType Supertype hierarchy s
+                              []    -> error $ "missing case " ++ show t
 
 
 parseAndCheck p filename = do
@@ -504,8 +519,8 @@ makeNewRules matchResults hierarchy = do
     NoMatch e -> do
       rhs <- generateRhs hierarchy e
       Nonterminal lhs <- findAppropriateLhs hierarchy e
-      let rule = JRule (typeof e) lhs rhs e
-      modify (\skin -> skin { jrules = rule : (jrules skin) })
+      let rule = Rule (typeof e) lhs rhs e
+      modify (\skin -> skin { rules = rule : (rules skin) })
       return ()
     _ -> return ()
   return ()
@@ -558,11 +573,11 @@ main = do
 
   -- For each unmatched constructor, generate a new factory method and generate a new rule that invokes that method.
 
-  forM_ (jrules skin') print
+  forM_ (rules skin') print
 
   let skin'' = execState (makeNewRules matchResults hierarchy) skin'
 
-  forM_ (jrules skin'') print
+  forM_ (rules skin'') print
 
   -- Need to prune the grammar.
   -- Starting at root symbol ("goal")
@@ -598,6 +613,6 @@ main = do
           debug $ "  " ++ x
 -}
 
-  let skin'' = skin { jrules = removeUnreachableRules (jrules skin') }
+  let skin'' = skin { rules = removeUnreachableRules (rules skin') }
 
   return ()

@@ -8,9 +8,8 @@ import Text.Parsec.Language (haskellDef)
 import Text.Parsec.String
 import Control.Applicative((<$>), (<*>), (<*), (*>), (<$))
 import Control.Monad.State
-import Data.List ((\\), find, sortBy, minimum, minimumBy)
+import Data.List (nub)
 import Data.Char (toLower, toUpper, isLower, isUpper)
-import Data.Maybe (catMaybes, listToMaybe)
 import Debug.Trace (trace)
 
 import Aliases
@@ -31,19 +30,17 @@ skin = do
   datatypes <- many datatype
   reserved "lexer"
   tokens <- many token
-  reserved "template"
   templates <- many template
   reserved "grammar"
   rules <- many rule
   eof
-  return $ Skin { langname = langname,
-                  interfaces = map fst datatypes,
-                  factories = concatMap snd datatypes,
+  return Skin { langname = langname,
+                  interfaces = nub $ concatMap fst datatypes,
+                  factories = nub $ concatMap snd datatypes,
                   tokens = tokens,
                   aliases = aliases,
                   templates = templates,
-                  rules = concat rules,
-                  jrules = [] }
+                  rules = concat rules }
 
 token :: Parser (String, Type)
 token = reserved "token" *> do { t <- name; n <- name; return (n, TCon t []) }
@@ -67,13 +64,14 @@ alias = do
 
 template :: Parser Template
 template = do
+  reserved "template"
   t <- typ []
   punct "->"
   t' <- typ []
   punct "::="
-  rhs <- rhsWithoutAction
+  (rhs, action) <- rhs
   punct ";"
-  return $ Template t t' rhs
+  return $ Template t t' rhs action
 
 rule :: Parser [Rule]
 rule = do
@@ -84,7 +82,7 @@ rule = do
   punct ";"
   return $ map (\(rhs, action) -> Rule t lhs rhs action) rhss
 
-rhs :: Parser ([(Sym, String)], Exp)
+rhs :: Parser ([(Sym, String)], JExp)
 rhs = do
   syms <- many (try $ nonterm <|> term)
   a <- action
@@ -95,7 +93,7 @@ rhsWithoutAction = do
   syms <- many (try $ nonterm <|> term)
   return $ syms
 
-action :: Parser Exp
+action :: Parser JExp
 action = do
   punct "{"
   e <- expression
@@ -103,53 +101,56 @@ action = do
   ws
   return e
 
-expression :: Parser Exp
+expression :: Parser JExp
 expression = try $ cons `chainr1`
-  (do { punct "++"; return (\x y -> Op "++" [x, y]) })
+  (do { punct "++"; return (\x y -> JOp "++" [x, y] TBoh) })
 
-cons :: Parser Exp
+cons :: Parser JExp
 cons = try $ primary `chainr1`
-  (do { punct ":"; return (\x y -> Op ":" [x, y]) })
+  (do { punct ":"; return (\x y -> JOp ":" [x, y] TBoh) })
 
-application :: Parser Exp
+application :: Parser JExp
 application = try $ do
   x <- name
   case x of
-    "Nil" -> return $ K "Nil" []
-    "Nothing" -> return $ K "Nothing" []
-    "True" -> return $ K "True" []
-    "False" -> return $ K "False" []
+    "Nil" -> return $ JK "Nil" TBoh
+    "Nothing" -> return $ JK "Nothing" TBoh
+    "True" -> return $ JK "true" (TCon "boolean" [])
+    "False" -> return $ JK "false" (TCon "boolean" [])
+    "Just" -> do
+      e <- primary
+      return $ JOp "Just" [e] TBoh
     x @ (y:_) | isUpper y -> do
       es <- many primary
-      return $ K x es
-    x -> return $ Var x
+      return $ JNew es (TCon x [])
+    x -> return $ JVar x TBoh
 
-primary :: Parser Exp
+primary :: Parser JExp
 primary = try (application <|> list expressions <|> tuple expressions)
 
 number :: Parser Int
 number = read <$> many1 digit <* ws
 
-expressions :: Parser [Exp]
+expressions :: Parser [JExp]
 expressions = try $ expression `sepBy` (punct ",")
 
-list :: Parser [Exp] -> Parser Exp
+list :: Parser [JExp] -> Parser JExp
 list p = do
   punct "["
   r <- p
   punct "]"
-  return $ foldr (\x y -> Op ":" [x, y]) (K "Nil" []) r
+  return $ foldr (\x y -> JOp ":" [x, y] TBoh) (JK "Nil" TBoh) r
 
-tuple :: Parser [Exp] -> Parser Exp
+tuple :: Parser [JExp] -> Parser JExp
 tuple p = do
   punct "("
   r <- p
   punct ")"
   case r of
-    [] -> return $ K "()" []
+    [] -> return $ JK "()" (TCon "void" [])
     [x] -> return x
-    [x,y] -> return $ Op "(,)" [x,y]
-    [x,y,z] -> return $ Op "(,,)" [x,y,z]
+    [x,y] -> return $ JOp "(,)" [x,y] (TCon "(,)" [typeof x, typeof y])
+    [x,y,z] -> return $ JOp "(,,)" [x,y,z] (TCon "(,,)" [typeof x, typeof y, typeof z])
     _ -> error "tuples larger than 3 not supported"
 
 term :: Parser (Sym, String)
@@ -168,14 +169,18 @@ nonterm = do
     option (Nonterminal x, "_")
       (punct ":" *> do { k <- name; return (Nonterminal x, k)})
 
-datatype :: Parser (JInterface, [JConstructor])
+datatype :: Parser ([JInterface], [JConstructor])
 datatype = try $ do
   reserved "data"
   lhs <- name
   params <- many name
   punct "="
   cases <- (kase params) `sepBy` (punct "|")
-  return $ (JInterface lhs (TCon "Object" []), map (\(label, children) -> JConstructor label (toFields children) (TCon lhs [])) cases)
+  return $ (JInterface lhs (TCon "Object" []) :
+     map (\(label, children) -> JInterface label (TCon lhs [])) (filter (\(label, _) -> label /= lhs) cases),
+     map (\(label, children) -> JConstructor label (toFields children) (TCon label [])) cases)
+  -- return $ (JInterface lhs (TCon "Object" []) : [],
+  --    map (\(label, children) -> JConstructor label (toFields children) (TCon lhs [])) cases)
 
 -- fixme: use actual field names for records
 -- for Java code Add(Exp, Exp) { left = a1, right = a2 }

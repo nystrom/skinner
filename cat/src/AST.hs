@@ -10,8 +10,7 @@ data Skin = Skin {
   tokens :: [(String, Type)],
   aliases :: [[String]],
   templates :: [Template],
-  rules :: [Rule],
-  jrules :: [JRule]
+  rules :: [Rule]
 } deriving Show
 
 data JAST = JAST {
@@ -37,47 +36,42 @@ data Type =
     TVar Tyvar
     -- TCon tau1 tau2
   | TCon String [Type]
+  | TBoh
   deriving (Eq, Ord)
 
 funType :: Type -> Type -> Type
 funType s t = TCon "->" [s, t]
 
 funType' :: [Type] -> Type -> Type
-funType' ss t = foldr funType t ss
+-- funType' ss t = foldr funType t ss
+funType' ss t = funType (tupleType ss) t
+
+tupleType :: [Type] -> Type
+tupleType [] = TCon "void" []
+tupleType [s] = s
+tupleType (s:ss) = TCon label ss
+  where
+    label = "(" ++ map (const ',') ss ++ ")"
 
 instance Show Type where
   show (TVar (Tyvar v)) = v
-  show (TCon "->" [s, t]) = (show s) ++ " -> " ++ (show t)
-  show (TCon "[]" [t]) = "[" ++ (show t) ++ "]"
-  show (TCon "(,)" [s,t]) = "(" ++ (show s) ++ ", " ++ (show t) ++ ")"
-  show (TCon "(,,)" [s,t,u]) = "(" ++ (show s) ++ ", " ++ (show t) ++ ", " ++ (show u) ++ ")"
+  show (TCon "->" [s, t]) = show s ++ " -> " ++ show t
+  show (TCon "List" [t]) = "[" ++ show t ++ "]"
+  show (TCon "(,)" [s,t]) = "(" ++ show s ++ ", " ++ show t ++ ")"
+  show (TCon "(,,)" [s,t,u]) = "(" ++ show s ++ ", " ++ show t ++ ", " ++ show u ++ ")"
   show (TCon k []) = k
   show (TCon k ts) = k ++ " " ++ (tail $ foldl (\s t -> s ++ " " ++ show t) "" ts)
+  show TBoh = "boh!"
 
 -- alpha
 data Tyvar = Tyvar String
   deriving (Show, Eq, Ord)
 
-data Rule = Rule Type String [(Sym, String)] Exp
+data Rule = Rule Type String [(Sym, String)] JExp
   deriving (Show, Eq)
 
-data JRule = JRule Type String [(Sym, String)] JExp
+data Template = Template Type Type [(Sym, String)] JExp
   deriving (Show, Eq)
-
-data Template = Template Type Type [(Sym, String)]
-  deriving (Show, Eq)
-
-data Exp = Var String
-         | Op String [Exp]
-         | K String [Exp]
-  deriving (Eq, Ord)
-
-instance Show Exp where
-  show (Op ":" [e1, e2]) = show e1 ++ ":" ++ show e2
-  show (Op "++" [e1, e2]) = show e1 ++ " ++ " ++ show e2
-  show (Op x es) = x ++ " (" ++ intercalate ", " (map show es) ++ ")"
-  show (Var x) = x
-  show (K k es) = k ++ " (" ++ intercalate ", " (map show es) ++ ")"
 
 data JExp = JNew [JExp] Type
           | JOp String [JExp] Type
