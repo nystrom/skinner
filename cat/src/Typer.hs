@@ -134,20 +134,20 @@ subst s (JVar x t) =
   JVar x (substTy s t)
 
 typeCheck :: JExp -> TC JExp
-typeCheck (JOp "++" [e1,e2] _) = do
+typeCheck (JOp "++" [e1, e2] _) = do
   e1' <- typeCheck e1
   e2' <- typeCheck e2
   a <- freshTyvar
   unifySubtype (typeof e1') (TCon "List" [TVar a])
   unifySubtype (typeof e2') (TCon "List" [TVar a])
-  return (JOp "++" [e1', e2'] (typeof e2'))
-typeCheck (JOp ":" [e1,e2] _) = do
+  return (JOp "++" [e1', e2'] (TCon "List" [TVar a]))
+typeCheck (JOp ":" [e1, e2] _) = do
   e1' <- typeCheck e1
   e2' <- typeCheck e2
   a <- freshTyvar
   unifySubtype (typeof e1') (TVar a)
   unifySubtype (typeof e2') (TCon "List" [TVar a])
-  return (JOp ":" [e1',e2'] (typeof e2'))
+  return (JOp ":" [e1', e2'] (TCon "List" [TVar a]))
 typeCheck (JK "Nil" _) = do
   a <- freshTyvar
   return $ JK "Nil" (TCon "List" [TVar a])
@@ -169,7 +169,7 @@ typeCheck (JK k _) = do
 typeCheck (JNew es (TCon k [])) = do
   es' <- mapM typeCheck es
   let ts = map typeof es'
-  TCon "->" [ts',t'] <- lookupVar k
+  TCon "->" [ts', t'] <- lookupVar k
   unifySubtype (tupleType ts) ts'
   unifySubtype t' (TCon k [])
   unifySubtype (TCon k []) t'
@@ -178,11 +178,14 @@ typeCheck (JNew es (TCon k [])) = do
   return $ JNew es' (TCon k [])
 typeCheck (JVar x _) = do
   t <- lookupVar x
+  case t of
+    TBoh -> error $ "type of " ++ x ++ " in environment was " ++ show t
+    _ -> return ()
   return $ JVar x t
 typeCheck e =
   error $ "missing case " ++ show e
 
-typeCheckRules tokens factories rules = do
+typeCheckRules tokens factories rules templates = do
   bindings <- forM rules $ \(Rule t lhs rhs action) ->
     return (lhs, t)
 
@@ -192,15 +195,31 @@ typeCheckRules tokens factories rules = do
   typeBindings <- forM factories $ \(JConstructor label children super) ->
     return (label, funType' (map snd children) super)
 
-  rules' <- local (addBindings $ typeBindings ++ bindings ++ tokenBindings) $
+  let env = addBindings $ typeBindings ++ bindings ++ tokenBindings
+
+  rules' <- local env $
     forM rules $ \(Rule tlhs lhs rhs action) ->
       local (rhsBindings rhs) $ do
         e' <- typeCheck action
         unifySubtype (typeof e') tlhs
+        case typeof e' of
+          TBoh -> error $ "could not replace type of " ++ show action ++ " with " ++ show e' ++ " in " ++ show (Rule tlhs lhs rhs action)
+          _ -> return ()
         s <- gets currSubst
         return $ Rule (substTy s tlhs) lhs rhs (subst s e')
 
-  return rules'
+  templates' <- local env $
+    forM templates $ \(Template told tlhs rhs action) ->
+      local (rhsBindings rhs) $ do
+        e' <- typeCheck action
+        unifySubtype (typeof e') tlhs
+        case typeof e' of
+          TBoh -> error $ "could not replace type of " ++ show action ++ " with " ++ show e' ++ " in " ++ show (Template told tlhs rhs action)
+          _ -> return ()
+        s <- gets currSubst
+        return $ Template (substTy s told) (substTy s tlhs) rhs (subst s e')
+
+  return (rules', templates')
 
 makeHierarchy :: [JInterface] -> [JConstructor] -> M.Map String Type
 makeHierarchy is fs = h
@@ -216,8 +235,8 @@ typeCheckSkin :: Skin -> IO Skin
 typeCheckSkin skin = do
   -- Type check the rules in the grammar rules
   let subtypeHierarchy = makeHierarchy (interfaces skin) (factories skin)
-  let rules' = runTC subtypeHierarchy $ typeCheckRules (tokens skin) (factories skin) (rules skin)
-  return skin { rules = rules' }
+  let (rules', templates') = runTC subtypeHierarchy $ typeCheckRules (tokens skin) (factories skin) (rules skin) (templates skin)
+  return skin { rules = rules', templates = templates' }
 
 substTy :: Subst -> Type -> Type
 substTy s t @ (TVar x) = case lookup x s of

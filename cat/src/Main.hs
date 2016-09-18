@@ -43,7 +43,6 @@ instance Wordy JExp where
 
 instance Wordy Type where
   toBagOfWords (TCon label []) = [label]
-  toBagOfWords (TCon label []) = [label]
   toBagOfWords _               = []
 
 isNullable :: Type -> Bool
@@ -360,9 +359,8 @@ matchTypes skin jast = do
                               tokens = substTokens s (tokens skin),
                               templates = substTemplates s (templates skin) }
 
-
     substTemplates s js = map (substTemplate s) js
-    substTemplate s (Template t1 t2 rhs action) = Template (substType s t1) (substType s t2) rhs action
+    substTemplate s (Template t1 t2 rhs e) = Template (substType s t1) (substType s t2) rhs (substExp s e)
 
     substTokens s js = map (substToken s) js
     substToken s (x, t) = (x, substType s t)
@@ -374,19 +372,31 @@ matchTypes skin jast = do
     substCtor s (JConstructor label fields super) = JConstructor label (substFields s fields) (substType s super)
 
     substRules s js = map (substRule s) js
-    substRule s (Rule typ label rhs e) = Rule (substType s typ) label rhs e
+    substRule s (Rule typ label rhs e) = Rule (substType s typ) label rhs (substExp s e)
 
     substFields s fields = map (substField s) fields
     substField s (x,t) = (x, substType s t)
 
     substType s (TCon label ts) = TCon (substLabel s label) (map (substType s) ts)
-    substType s (TCon label ts) = TCon (substLabel s label) (map (substType s) ts)
     substType s (TVar x) = TVar x
+    substType s TBoh = error $ "cannot subst unknown type"
 
     substLabel [] label = label
     substLabel ((JInterface old _, JInterface new _):rest) label
       | label == old = new
       | otherwise    = substLabel rest label
+
+    substExp s e = do
+      let e' = substExp' s e
+      case typeof e' of
+        TCon "void" [] -> JK "()" (TCon "void" [])
+        TBoh -> error $ "did not replace type of " ++ show e
+        t -> e'
+
+    substExp' s (JNew es t) = JNew (map (substExp s) es) (substType s t)
+    substExp' s (JOp k es t) = JOp k (map (substExp s) es) (substType s t)
+    substExp' s (JK k t) = JK k (substType s t)
+    substExp' s (JVar x t) = JVar x (substType s t)
 
 removeUnreachableRules :: [Rule] -> [Rule]
 removeUnreachableRules rules = rules  -- remove rules unreachable from the start symbol
