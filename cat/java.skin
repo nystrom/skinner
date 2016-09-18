@@ -60,7 +60,7 @@ alias cond conditional
 
 ast
 
-data Exp = IntLit int
+data EXPRESSION = IntLit int
         | LongLit long
         | DoubleLit double
         | FloatLit float
@@ -68,63 +68,63 @@ data Exp = IntLit int
         | CharLit char
         | StringLit String
         | NullLit
-        | This (Maybe Type)
-        | ClassLit Type
-        | New Type [Exp] (Maybe ClassBody)
-        | QualifiedNew Exp Identifier [Exp] (Maybe ClassBody)
-        | NewArray Type [Exp] ExtraDimensions (Maybe Exp)
-        | Field Exp Identifier
-        | StaticField Type Identifier
-        | Super (Maybe Type)
-        | Call (Maybe Exp) Identifier [Exp]
-        | StaticCall Type Identifier [Exp]
-        | ArrayAccess Exp Exp
-        | PostIncrement Exp
-        | PostDecrement Exp
-        | PreIncrement Exp
-        | PreDecrement Exp
-        | UnaryPlus Exp
-        | UnaryMinus Exp
-        | BitNot Exp
-        | LogicalNot Exp
-        | Cast Type Exp
-        | Mul Exp Exp
-        | Div Exp Exp
-        | Mod Exp Exp
-        | Add Exp Exp
-        | Sub Exp Exp
-        | Shl Exp Exp
-        | Shr Exp Exp
-        | UShr Exp Exp
-        | Less Exp Exp
-        | Greater Exp Exp
-        | LessEqual Exp Exp
-        | GreaterEqual Exp Exp
-        | InstanceOf Exp Type
-        | Equals Exp Exp
-        | NotEquals Exp Exp
-        | BitAnd Exp Exp
-        | BitXor Exp Exp
-        | BitOr Exp Exp
-        | CondAnd Exp Exp
-        | CondOr Exp Exp
-        | Conditional Exp Exp Exp
-        | Assign Exp Exp
-        | MulAssign Exp Exp
-        | DivAssign Exp Exp
-        | ModAssign Exp Exp
-        | AddAssign Exp Exp
-        | SubAssign Exp Exp
-        | ShlAssign Exp Exp
-        | ShrAssign Exp Exp
-        | UShrAssign Exp Exp
-        | AndAssign Exp Exp
-        | XorAssign Exp Exp
-        | OrAssign Exp Exp
-        | ArrayInit [Exp]
-        | Var Identifier
+        | This (Maybe TYPE)
+        | ClassLit TYPE
+        | New TYPE [EXPRESSION] (Maybe CLASS_BODY)
+        | QualifiedNew EXPRESSION IDENTIFIER [EXPRESSION] (Maybe CLASS_BODY)
+        | NewArray TYPE [EXPRESSION] DIMENSIONS (Maybe EXPRESSION)
+        | Field EXPRESSION IDENTIFIER
+        | StaticField TYPE IDENTIFIER
+        | Super (Maybe TYPE)
+        | Call (Maybe EXPRESSION) IDENTIFIER [EXPRESSION]
+        | StaticCall TYPE IDENTIFIER [EXPRESSION]
+        | ArrayAccess EXPRESSION EXPRESSION
+        | PostIncrement EXPRESSION
+        | PostDecrement EXPRESSION
+        | PreIncrement EXPRESSION
+        | PreDecrement EXPRESSION
+        | UnaryPlus EXPRESSION
+        | UnaryMinus EXPRESSION
+        | BitNot EXPRESSION
+        | LogicalNot EXPRESSION
+        | Cast TYPE EXPRESSION
+        | Mul EXPRESSION EXPRESSION
+        | Div EXPRESSION EXPRESSION
+        | Mod EXPRESSION EXPRESSION
+        | Add EXPRESSION EXPRESSION
+        | Sub EXPRESSION EXPRESSION
+        | Shl EXPRESSION EXPRESSION
+        | Shr EXPRESSION EXPRESSION
+        | UShr EXPRESSION EXPRESSION
+        | Less EXPRESSION EXPRESSION
+        | Greater EXPRESSION EXPRESSION
+        | LessEqual EXPRESSION EXPRESSION
+        | GreaterEqual EXPRESSION EXPRESSION
+        | InstanceOf EXPRESSION TYPE
+        | Equals EXPRESSION EXPRESSION
+        | NotEquals EXPRESSION EXPRESSION
+        | BitAnd EXPRESSION EXPRESSION
+        | BitXor EXPRESSION EXPRESSION
+        | BitOr EXPRESSION EXPRESSION
+        | CondAnd EXPRESSION EXPRESSION
+        | CondOr EXPRESSION EXPRESSION
+        | Conditional EXPRESSION EXPRESSION EXPRESSION
+        | Assign EXPRESSION EXPRESSION
+        | MulAssign EXPRESSION EXPRESSION
+        | DivAssign EXPRESSION EXPRESSION
+        | ModAssign EXPRESSION EXPRESSION
+        | AddAssign EXPRESSION EXPRESSION
+        | SubAssign EXPRESSION EXPRESSION
+        | ShlAssign EXPRESSION EXPRESSION
+        | ShrAssign EXPRESSION EXPRESSION
+        | UShrAssign EXPRESSION EXPRESSION
+        | AndAssign EXPRESSION EXPRESSION
+        | XorAssign EXPRESSION EXPRESSION
+        | OrAssign EXPRESSION EXPRESSION
+        | ArrayInit [EXPRESSION]
+        | Var IDENTIFIER
 
-data Type = BooleanType
+data TYPE = BooleanType
         | ByteType
         | CharType
         | ShortType
@@ -132,24 +132,24 @@ data Type = BooleanType
         | LongType
         | FloatType
         | DoubleType
-        | NameType Name
-        | ArrayType Type
+        | NameType NAME
+        | ArrayType TYPE
         | VoidType
 
-data ExtraDimensions = Zero | Succ ExtraDimensions
+data DIMENSIONS = Zero | Succ DIMENSIONS
 
-data Name = Name (Maybe Name) Identifier
-          | NameFromList [Identifier]
+data NAME = Name (Maybe NAME) IDENTIFIER
+          | NameFromList [IDENTIFIER]
 
-data Identifier = Identifier String
+data IDENTIFIER = Identifier String
 
-data Source = Source (Maybe Package) [Import] [Decl]
+data SOURCE = Source (Maybe PACKAGE) [IMPORT] [DECLARATION]
 
-data Package = Package Name
+data PACKAGE = Package NAME
 
-data Import = SingleImport Name | OnDemandImport Name
+data IMPORT = SingleImport NAME | OnDemandImport NAME
 
-data Modifier = PublicModifier
+data MODIFIER = PublicModifier
         | ProtectedModifier
         | PrivateModifier
         | StaticModifier
@@ -161,44 +161,44 @@ data Modifier = PublicModifier
         | VolatileModifier
         | StrictFPModifier
 
-data Decl = ClassDecl [Modifier] Identifier (Maybe Type) [Type] ClassBody
-        | InterfaceDecl [Modifier] Identifier [Type] ClassBody
-        | Initializer [Modifier] Stm
-        | FieldDecl [Modifier] Type [VariableDeclarator]
-        | MethodDecl [Modifier] Type ExtraDimensions Identifier [Formal] [Type] (Maybe Stm)
-        | ConstructorDecl [Modifier] Identifier [Formal] [Type] (Maybe Stm)
+data DECLARATION = ClassDecl [MODIFIER] IDENTIFIER (Maybe TYPE) [TYPE] CLASS_BODY
+        | InterfaceDecl [MODIFIER] IDENTIFIER [TYPE] CLASS_BODY
+        | Initializer [MODIFIER] STATEMENT
+        | FieldDecl [MODIFIER] TYPE [VARIABLE_DECLARATOR]
+        | MethodDecl [MODIFIER] TYPE DIMENSIONS IDENTIFIER [FORMAL] [TYPE] (Maybe STATEMENT)
+        | ConstructorDecl [MODIFIER] IDENTIFIER [FORMAL] [TYPE] (Maybe STATEMENT)
 
-data VariableDeclarator = VariableDeclarator Identifier ExtraDimensions (Maybe Exp)
+data VARIABLE_DECLARATOR = VariableDeclarator IDENTIFIER DIMENSIONS (Maybe EXPRESSION)
 
-data ClassBody = ClassBody [Decl]
+data CLASS_BODY = ClassBody [DECLARATION]
 
-data Formal = Formal [Modifier] Type Identifier ExtraDimensions
+data FORMAL = Formal [MODIFIER] TYPE IDENTIFIER DIMENSIONS
 
-data Catch = Catch Formal Stm
+data CATCH = Catch FORMAL STATEMENT
 
-data Stm =
-    ThisCall (Maybe Exp) [Exp]
-  | SuperCall (Maybe Exp) [Exp]
-  | Block [Stm]
-  | LocalClassDecl Decl
-  | LocalDecl [Modifier] Type [VariableDeclarator]
+data STATEMENT =
+    ThisCall (Maybe EXPRESSION) [EXPRESSION]
+  | SuperCall (Maybe EXPRESSION) [EXPRESSION]
+  | Block [STATEMENT]
+  | LocalClassDecl DECLARATION
+  | LocalDecl [MODIFIER] TYPE [VARIABLE_DECLARATOR]
   | EmptyStm
-  | Labeled Identifier Stm
-  | EvalStm Exp
-  | IfThen Exp Stm
-  | IfThenElse Exp Stm Stm
-  | Switch Exp [Stm]
-  | Case (Maybe Exp)
-  | While Exp Stm
-  | Do Stm Exp
-  | For [Stm] (Maybe Exp) [Stm] Stm
-  | Break (Maybe Identifier)
-  | Continue (Maybe Identifier)
-  | Return (Maybe Exp)
-  | Throw Exp
-  | Synchronized Exp Stm
-  | Try Stm [Catch] (Maybe Stm)
-  | Assert Exp (Maybe Exp)
+  | Labeled IDENTIFIER STATEMENT
+  | EvalStm EXPRESSION
+  | IfThen EXPRESSION STATEMENT
+  | IfThenElse EXPRESSION STATEMENT STATEMENT
+  | Switch EXPRESSION [STATEMENT]
+  | Case (Maybe EXPRESSION)
+  | While EXPRESSION STATEMENT
+  | Do STATEMENT EXPRESSION
+  | For [STATEMENT] (Maybe EXPRESSION) [STATEMENT] STATEMENT
+  | Break (Maybe IDENTIFIER)
+  | Continue (Maybe IDENTIFIER)
+  | Return (Maybe EXPRESSION)
+  | Throw EXPRESSION
+  | Synchronized EXPRESSION STATEMENT
+  | Try STATEMENT [CATCH] (Maybe STATEMENT)
+  | Assert EXPRESSION (Maybe EXPRESSION)
 
 lexer
 
@@ -210,36 +210,38 @@ token double DOUBLE_LITERAL
 token char CHAR_LITERAL
 token String STRING_LITERAL
 
-template
 
-Type -> Type ::= "<" type ">" ;
-Type -> [Type] ::= "<" types ">" ;
-Type -> Exp ::= "(" expression ")" ;
-Type -> [Exp] ::= "(" argument_list ")" ;
 
-Exp -> Type ::= "<" type ">" ;
-Exp -> [Type] ::= "<" types ">" ;
-Exp -> Exp ::= expression ;
-Exp -> [Exp] ::= "(" argument_list ")" ;
+template TYPE -> TYPE ::= "<" type:a ">" { a };
+template TYPE -> [TYPE] ::= "<" types:a ">" { a };
+template TYPE -> EXPRESSION ::= "(" expression:a ")" { a };
+template TYPE -> [EXPRESSION] ::= "(" argument_list:a ")" { a };
 
-Stm -> Type ::= "<" type ">" ;
-Stm -> [Type] ::= "<" types ">" ;
-Stm -> Exp ::= "(" expression ")" ;
-Stm -> [Exp] ::= "(" argument_list ")" ;
-Stm -> [Stm] ::= "{" block_statements "}" ;
-Stm -> Stm ::= statement ;
+template EXPRESSION -> TYPE ::= "<" type:a ">" { a };
+template EXPRESSION -> [TYPE] ::= "<" types:a ">" { a };
+template EXPRESSION -> EXPRESSION ::= expression:a { a };
+template EXPRESSION -> [EXPRESSION] ::= "(" argument_list:a ")" { a };
 
--- Stm ::= ... ";" if last child not Stm
+template STATEMENT -> TYPE ::= "<" type:a ">" { a };
+template STATEMENT -> [TYPE] ::= "<" types:a ">" { a };
+template STATEMENT -> EXPRESSION ::= "(" expression:a ")" { a };
+template STATEMENT -> [EXPRESSION] ::= "(" argument_list:a ")" { a };
+template STATEMENT -> [STATEMENT] ::= "{" block_statements:a "}" { a };
+template STATEMENT -> STATEMENT ::= statement:a { a };
+
+-- template Object -> [A] ::= "(" object_list:a ")" { a };
+
+-- STATEMENT ::= ... ";" if last child not STATEMENT
 -- keyword at the beginning
 -- no nonterminals juxtaposed
 
 grammar
 
-Source goal ::=
+SOURCE goal ::=
         compilation_unit:a
             { a }
     ;
-Exp literal ::=
+EXPRESSION literal ::=
         INT_LITERAL:a
             { IntLit a }
     |   LONG_LITERAL:a
@@ -259,13 +261,13 @@ Exp literal ::=
     |   "null"
             { NullLit }
     ;
-Type type ::=
+TYPE type ::=
         primitive_type:a
             { a }
     |   reference_type:a
             { a }
     ;
-Type primitive_type ::=
+TYPE primitive_type ::=
         numeric_type:a
             { a }
     |   "boolean"
@@ -273,13 +275,13 @@ Type primitive_type ::=
     |   "void"
             { VoidType }
     ;
-Type numeric_type::=
+TYPE numeric_type::=
         integral_type:a
             { a }
     |   floating_point_type:a
             { a }
     ;
-Type integral_type ::=
+TYPE integral_type ::=
         "byte"
             { ByteType }
     |   "char"
@@ -291,99 +293,99 @@ Type integral_type ::=
     |   "long"
             { LongType }
     ;
-Type floating_point_type ::=
+TYPE floating_point_type ::=
         "float"
             { FloatType }
     |   "double"
             { DoubleType }
     ;
-Type reference_type ::=
+TYPE reference_type ::=
         name_type:a
             { a }
     |   array_type:a
             { a }
     ;
-Type name_type ::=
+TYPE name_type ::=
         name:a
             { NameType a }
     ;
-Type array_type ::=
+TYPE array_type ::=
         type:a dim
             { ArrayType a }
     ;
-Name name    ::=
+NAME name    ::=
         simple_name:a
             { a }
     |   qualified_name:a
             { a }
     ;
-Name simple_name ::=
+NAME simple_name ::=
         ident:a
             { Name Nothing a }
     |   ident:a
             { NameFromList [a] }
     ;
-Name qualified_name ::=
+NAME qualified_name ::=
         name:a "." ident:b
             { Name (Just a) b }
     |   ident:a "." ident_list:b
             { NameFromList (a:b) }
     ;
-[Identifier] ident_list ::=
+[IDENTIFIER] ident_list ::=
         ident:a
             { [a] }
     |   ident:a ident_list:b
             { a : b }
     ;
-Source compilation_unit ::=
+SOURCE compilation_unit ::=
         package_declaration_opt:a
         import_declarations_opt:b
         type_declarations_opt:c
             { Source a b c }
         ;
-(Maybe Package) package_declaration_opt ::=
+(Maybe PACKAGE) package_declaration_opt ::=
         package_declaration:a
             { Just a }
     |
             { Nothing }
     ;
-Package package_declaration ::=
+PACKAGE package_declaration ::=
         "package" name:a ";"
             { Package a }
     ;
-[Import] import_declarations_opt ::=
+[IMPORT] import_declarations_opt ::=
         import_declarations:a
             { a }
     |
             { [] }
     ;
-[Import] import_declarations ::=
+[IMPORT] import_declarations ::=
         import_declaration:a
             { [a] }
     |   import_declaration:a import_declarations:b
             { a : b }
     ;
-Import import_declaration ::=
+IMPORT import_declaration ::=
         single_type_import_declaration:a
             { a }
     |   type_import_on_demand_declaration:a
             { a }
     ;
-Import single_type_import_declaration ::=
+IMPORT single_type_import_declaration ::=
         "import" qualified_name:b ";"
             { SingleImport b }
     ;
-Import type_import_on_demand_declaration ::=
+IMPORT type_import_on_demand_declaration ::=
         "import" name:b "." "*" ";"
             { OnDemandImport b }
     ;
-[Decl] type_declarations_opt   ::=
+[DECLARATION] type_declarations_opt   ::=
         type_declarations:a
             { a }
     |
             { [] }
     ;
-[Decl] type_declarations ::=
+[DECLARATION] type_declarations ::=
         type_declaration:a
             { [a] }
     |   type_declaration:a type_declarations:b
@@ -393,24 +395,24 @@ Import type_import_on_demand_declaration ::=
     |   ";" type_declarations:b
             { b }
     ;
-Decl type_declaration ::=
+DECLARATION type_declaration ::=
         class_declaration:a
             { a }
     |   interface_declaration:a
             { a }
     ;
-[Modifier] modifiers_opt::=
+[MODIFIER] modifiers_opt::=
             { [] }
     |   modifiers:a
             { a }
     ;
-[Modifier] modifiers ::=
+[MODIFIER] modifiers ::=
         modifier:a
             { [a] }
     |   modifier:a modifiers:b
             { a : b }
     ;
-Modifier modifier ::=
+MODIFIER modifier ::=
         "public"
             { PublicModifier }
     |   "protected"
@@ -434,39 +436,39 @@ Modifier modifier ::=
     |   "strictfp"
             { StrictFPModifier }
     ;
-Decl class_declaration ::=
+DECLARATION class_declaration ::=
         modifiers_opt:a "class" ident:b
                 super_opt:c interfaces_opt:d class_body:e
             { ClassDecl a b c d e }
     ;
-Type super ::=
+TYPE super ::=
         "extends" name_type:a
             { a }
     ;
-(Maybe Type) super_opt ::=
+(Maybe TYPE) super_opt ::=
             { Nothing }
     |   super:a
             { Just a }
     ;
-[Type] interfaces ::=
+[TYPE] interfaces ::=
         "implements" types:a
             { a }
     ;
-[Type] interfaces_opt ::=
+[TYPE] interfaces_opt ::=
             { [] }
     |   interfaces:a
             { a }
     ;
-ClassBody class_body ::=
+CLASS_BODY class_body ::=
         "{" class_body_declarations_opt:a "}"
             { ClassBody a }
     ;
-[Decl] class_body_declarations_opt ::=
+[DECLARATION] class_body_declarations_opt ::=
             { [] }
     |   class_body_declarations:a
             { a }
     ;
-[Decl] class_body_declarations ::=
+[DECLARATION] class_body_declarations ::=
         ";"
             { [] }
     |   class_body_declaration:a
@@ -476,7 +478,7 @@ ClassBody class_body ::=
     |   class_body_declaration:a class_body_declarations:b
             { a : b }
     ;
-Decl class_body_declaration ::=
+DECLARATION class_body_declaration ::=
         class_member_declaration:a
             { a }
     |   constructor_declaration:a
@@ -486,7 +488,7 @@ Decl class_body_declaration ::=
     |   "static" block:a
             { Initializer [StaticModifier] a }
     ;
-Decl class_member_declaration ::=
+DECLARATION class_member_declaration ::=
         field_declaration:a
             { a }
     |   method_declaration:a
@@ -496,84 +498,84 @@ Decl class_member_declaration ::=
     |   interface_declaration:a
             { a }
     ;
-Decl field_declaration ::=
+DECLARATION field_declaration ::=
         modifiers_opt:a type:b variable_declarators:c ";"
             { FieldDecl a b c }
     ;
-[VariableDeclarator] variable_declarators ::=
+[VARIABLE_DECLARATOR] variable_declarators ::=
         variable_declarator:a
             { [a] }
     |   variable_declarator:a "," variable_declarators:b
             { a : b }
     ;
-VariableDeclarator variable_declarator ::=
+VARIABLE_DECLARATOR variable_declarator ::=
         ident:a dims_opt:b
             { VariableDeclarator a b Nothing }
     |   ident:a dims_opt:b EQ variable_initializer:c
             { VariableDeclarator a b (Just c) }
     ;
-Exp variable_initializer ::=
+EXPRESSION variable_initializer ::=
         expression:a
             { a }
     |   array_initializer:a
             { a }
     ;
-Decl method_declaration ::=
+DECLARATION method_declaration ::=
         modifiers_opt:a type:b ident:c "("
                 formal_parameter_list_opt:d ")" dims_opt:e throws_opt:f
                         method_body:g
             { MethodDecl a b e c d f g }
     ;
-[Formal] formal_parameter_list_opt ::=
+[FORMAL] formal_parameter_list_opt ::=
             { [] }
     |   formal_parameter_list:a
             { a }
     ;
-[Formal] formal_parameter_list ::=
+[FORMAL] formal_parameter_list ::=
         formal_parameter:a
             { [a] }
     |   formal_parameter:a "," formal_parameter_list:b
             { a : b }
     ;
-Formal formal_parameter ::=
+FORMAL formal_parameter ::=
         type:a ident:b dims_opt:c
             { Formal [] a b c }
     |   "final" type:a ident:b dims_opt:c
             { Formal [FinalModifier] a b c }
     ;
-[Type] throws_opt ::=
+[TYPE] throws_opt ::=
             { [] }
     |   throws:a
             { a }
     ;
-[Type] throws ::=
+[TYPE] throws ::=
         "throws" types:a
             { a }
     ;
-[Type] types ::=
+[TYPE] types ::=
         type:a
             { [a] }
     |   type:a "," types:b
             { a : b }
     ;
-(Maybe Stm) method_body ::=
+(Maybe STATEMENT) method_body ::=
         block:a
             { Just a }
     |   ";"
             { Nothing }
     ;
-Decl constructor_declaration ::=
+DECLARATION constructor_declaration ::=
         modifiers_opt:m ident:a "(" formal_parameter_list_opt:b ")"
             throws_opt:c constructor_body_opt:d
             { ConstructorDecl m a b c d }
     ;
-(Maybe Stm) constructor_body_opt ::=
+(Maybe STATEMENT) constructor_body_opt ::=
         constructor_body:a
             { Just a }
     |   ";"
             { Nothing }
       ;
-Stm constructor_body ::=
+STATEMENT constructor_body ::=
         "{" explicit_constructor_invocation:a block_statements:b "}"
             { Block (a : b) }
     |   "{" explicit_constructor_invocation:a "}"
@@ -583,7 +585,7 @@ Stm constructor_body ::=
     |   "{" "}"
             { Block [] }
     ;
-Stm explicit_constructor_invocation ::=
+STATEMENT explicit_constructor_invocation ::=
         "this" "(" argument_list_opt:b ")" ";"
             { ThisCall Nothing b }
     |   "super" "(" argument_list_opt:b ")" ";"
@@ -593,30 +595,30 @@ Stm explicit_constructor_invocation ::=
     |   primary:a "." "super" "(" argument_list_opt:b ")" ";"
             { SuperCall (Just a) b }
     ;
-Decl interface_declaration ::=
+DECLARATION interface_declaration ::=
         modifiers_opt:a "interface" ident:b
                 extends_interfaces_opt:c interface_body:d
             { InterfaceDecl a b c d }
     ;
-[Type] extends_interfaces_opt ::=
+[TYPE] extends_interfaces_opt ::=
             { [] }
     |   extends_interfaces:a
             { a }
     ;
-[Type] extends_interfaces ::=
+[TYPE] extends_interfaces ::=
         "extends" types:a
             { a }
     ;
-ClassBody interface_body ::=
+CLASS_BODY interface_body ::=
         "{" interface_member_declarations_opt:a "}"
             { ClassBody a }
     ;
-[Decl] interface_member_declarations_opt ::=
+[DECLARATION] interface_member_declarations_opt ::=
             { [] }
     |   interface_member_declarations:a
             { a }
     ;
-[Decl] interface_member_declarations ::=
+[DECLARATION] interface_member_declarations ::=
         ";"
             { [] }
     |   ";" interface_member_declarations:b
@@ -626,7 +628,7 @@ ClassBody interface_body ::=
     |   interface_member_declaration:a interface_member_declarations:b
             { a : b }
     ;
-Decl interface_member_declaration ::=
+DECLARATION interface_member_declaration ::=
         field_declaration:a
             { a }
     |   abstract_method_declaration:a
@@ -636,12 +638,12 @@ Decl interface_member_declaration ::=
     |   interface_declaration:a
             { a }
     ;
-Decl abstract_method_declaration ::=
+DECLARATION abstract_method_declaration ::=
         modifiers_opt:a type:b ident:c "("
                 formal_parameter_list_opt:d ")" dims_opt:e throws_opt:f ";"
             { MethodDecl a b e c d f Nothing }
     ;
-Exp array_initializer ::=
+EXPRESSION array_initializer ::=
         "{" variable_initializers:a "," "}"
             { ArrayInit a }
     |   "{" variable_initializers:a "}"
@@ -651,28 +653,28 @@ Exp array_initializer ::=
     |   "{" "}"
             { ArrayInit [] }
     ;
-[Exp] variable_initializers ::=
+[EXPRESSION] variable_initializers ::=
         variable_initializer:a
             { [a] }
     |   variable_initializer:a "," variable_initializers:b
             { a : b }
     ;
-Stm block ::=
+STATEMENT block ::=
         "{" block_statements_opt:a "}"
             { Block a }
     ;
-[Stm] block_statements_opt ::=
+[STATEMENT] block_statements_opt ::=
             { [] }
     |   block_statements:a
             { a }
     ;
-[Stm] block_statements ::=
+[STATEMENT] block_statements ::=
         block_statement:a
             { [a] }
     |   block_statement:a block_statements:b
             { a : b }
     ;
-Stm block_statement ::=
+STATEMENT block_statement ::=
         local_variable_declaration_statement:a
             { a }
     |   statement:a
@@ -680,17 +682,17 @@ Stm block_statement ::=
     |   class_declaration:a
             { LocalClassDecl a }
     ;
-Stm local_variable_declaration_statement ::=
+STATEMENT local_variable_declaration_statement ::=
         local_variable_declaration:a ";"
             { a }
     ;
-Stm local_variable_declaration ::=
+STATEMENT local_variable_declaration ::=
         type:a variable_declarators:b
             { LocalDecl [] a b }
     |   "final" type:a variable_declarators:b
             { LocalDecl [FinalModifier] a b }
     ;
-Stm statement ::=
+STATEMENT statement ::=
         block:a
             { a }
     |   empty_statement:a
@@ -726,19 +728,19 @@ Stm statement ::=
     |   for_statement:a
             { a }
     ;
-Stm empty_statement ::=
+STATEMENT empty_statement ::=
         ";"
             { EmptyStm }
     ;
-Stm labeled_statement ::=
+STATEMENT labeled_statement ::=
         ident:a ":" statement:b
             { Labeled a b }
     ;
-Stm expression_statement ::=
+STATEMENT expression_statement ::=
         statement_expression:a ";"
             { EvalStm a }
     ;
-Exp statement_expression ::=
+EXPRESSION statement_expression ::=
         assignment:a
             { a }
     |   preincrement_expression:a
@@ -754,19 +756,19 @@ Exp statement_expression ::=
     |   class_instance_creation_expression:a
             { a }
     ;
-Stm if_then_statement ::=
+STATEMENT if_then_statement ::=
         "if" "(" expression:a ")" statement:b
             { IfThen a b }
     ;
-Stm if_then_else_statement ::=
+STATEMENT if_then_else_statement ::=
         "if" "(" expression:a ")" statement:b "else" statement:c
             { IfThenElse a b c }
     ;
-Stm switch_statement ::=
+STATEMENT switch_statement ::=
         "switch" "(" expression:a ")" switch_block:b
             { Switch a b }
     ;
-[Stm] switch_block ::=
+[STATEMENT] switch_block ::=
         "{" switch_block_statement_groups:a switch_labels:b "}"
             { a ++ b }
     |   "{" switch_block_statement_groups:a "}"
@@ -776,134 +778,134 @@ Stm switch_statement ::=
     |   "{" "}"
             { [] }
     ;
-[Stm] switch_block_statement_groups ::=
+[STATEMENT] switch_block_statement_groups ::=
         switch_block_statement_group:a
             { a }
     |   switch_block_statement_groups:a switch_block_statement_group:b
             { a ++ b }
     ;
-[Stm] switch_block_statement_group ::=
+[STATEMENT] switch_block_statement_group ::=
         switch_labels:a block_statements:b
             { a ++ b }
     ;
-[Stm] switch_labels ::=
+[STATEMENT] switch_labels ::=
         switch_label:a
             { [a] }
     |   switch_labels:a switch_label:b
             { a ++ [b] }
     ;
-Stm switch_label ::=
+STATEMENT switch_label ::=
         "case" expression:a ":"
             { Case (Just a) }
     |   "default" ":"
             { Case Nothing }
     ;
-Stm while_statement ::=
+STATEMENT while_statement ::=
         "while" "(" expression:a ")" statement:b
             { While a b }
     ;
-Stm do_statement ::=
+STATEMENT do_statement ::=
         "do" statement:a "while" "(" expression:b ")" ";"
             { Do a b }
     ;
-Stm for_statement ::=
+STATEMENT for_statement ::=
         "for" "(" for_init_opt:a ";" expression_opt:b ";"
             for_update_opt:c ")" statement:d
             { For a b c d }
     ;
-[Stm] for_init_opt ::=
+[STATEMENT] for_init_opt ::=
             { [] }
     |   for_init:a
             { a }
     ;
-[Stm] for_init ::=
+[STATEMENT] for_init ::=
         statement_expression_list:a
             { a }
     |   local_variable_declaration:a
             { [a] }
     ;
-[Stm] for_update_opt ::=
+[STATEMENT] for_update_opt ::=
             { [] }
     |   for_update:a
             { a }
     ;
-[Stm] for_update ::=
+[STATEMENT] for_update ::=
         statement_expression_list:a
             { a }
     ;
-[Stm] statement_expression_list ::=
+[STATEMENT] statement_expression_list ::=
         statement_expression:a
             { [EvalStm a] }
     |   statement_expression:a "," statement_expression_list:b
             { (EvalStm a) : b }
     ;
-(Maybe Identifier) identifier_opt ::=
+(Maybe IDENTIFIER) identifier_opt ::=
             { Nothing }
     |   ident:a
             { Just a }
     ;
-Stm break_statement ::=
+STATEMENT break_statement ::=
         "break" identifier_opt:a ";"
             { Break a }
     ;
-Stm continue_statement ::=
+STATEMENT continue_statement ::=
         "continue" identifier_opt:a ";"
             { Continue a }
     ;
-Stm return_statement ::=
+STATEMENT return_statement ::=
         "return" expression_opt:a ";"
             { Return a }
     ;
-Stm throw_statement ::=
+STATEMENT throw_statement ::=
         "throw" expression:a ";"
             { Throw a }
     ;
-Stm synchronized_statement ::=
+STATEMENT synchronized_statement ::=
         "synchronized" "(" expression:a ")" block:b
             { Synchronized a b }
     ;
-Stm try_statement ::=
+STATEMENT try_statement ::=
         "try" block:a catches:b
             { Try a b Nothing }
     |   "try" block:a catches_opt:b finally:c
             { Try a b (Just c) }
     ;
-[Catch] catches_opt ::=
+[CATCH] catches_opt ::=
             { [] }
     |   catches:a
             { a }
     ;
-[Catch] catches ::=
+[CATCH] catches ::=
         catch_clause:a
             { [a] }
     |   catch_clause:a catches:b
             { a : b }
     ;
-Catch catch_clause ::=
+CATCH catch_clause ::=
         "catch" "(" formal_parameter:a ")" block:b
             { Catch a b }
     ;
-Stm finally ::=
+STATEMENT finally ::=
         "finally" block:a
             { a }
     ;
-Stm assert_statement ::=
+STATEMENT assert_statement ::=
         "assert" expression:a ";"
                 { Assert a Nothing }
     |   "assert" expression:a ":" expression:b ";"
                 { Assert a (Just b) }
     ;
-Exp primary ::=
+EXPRESSION primary ::=
         primary_no_new_array:a
             { a }
     |   array_creation_expression:a
             { a }
     ;
-Exp primary_no_new_array ::=
+EXPRESSION primary_no_new_array ::=
         literal:a
             { a }
     |   name_expr:a
-            { Var a }
+            { a }
     |   "this"
             { This Nothing }
     |   type:a "." "this"
@@ -921,7 +923,7 @@ Exp primary_no_new_array ::=
     |   type:a "." "class"
             { ClassLit a }
     ;
-Exp class_instance_creation_expression ::=
+EXPRESSION class_instance_creation_expression ::=
         "new" name_type:a "(" argument_list_opt:b ")"
             { New a b Nothing }
     |   "new" name_type:a "(" argument_list_opt:b ")" class_body:c
@@ -931,18 +933,18 @@ Exp class_instance_creation_expression ::=
     |   primary:a "." "new" ident:b "(" argument_list_opt:c ")" class_body:d
             { QualifiedNew a b c (Just d) }
     ;
-[Exp] argument_list_opt ::=
+[EXPRESSION] argument_list_opt ::=
             { [] }
     |   argument_list:a
             { a }
     ;
-[Exp] argument_list ::=
+[EXPRESSION] argument_list ::=
         expression:a
             { [a] }
     |   expression:a "," argument_list:b
             { a : b }
     ;
-Exp array_creation_expression ::=
+EXPRESSION array_creation_expression ::=
         "new" primitive_type:a dim_exprs:b dims_opt:c
             { NewArray a b c Nothing }
     |   "new" name_type:a dim_exprs:b dims_opt:c
@@ -952,28 +954,28 @@ Exp array_creation_expression ::=
     |   "new" name_type:a dims:b array_initializer:c
             { NewArray a [] b (Just c) }
     ;
-[Exp] dim_exprs ::=
+[EXPRESSION] dim_exprs ::=
         dim_expr:a
             { [a] }
     |   dim_expr:a dim_exprs:b
             { a : b }
     ;
-Exp dim_expr ::=
+EXPRESSION dim_expr ::=
         "[" expression:a "]"
             { a }
     ;
-ExtraDimensions dims_opt ::=
+DIMENSIONS dims_opt ::=
             { Zero }
     |   dims:a
             { a }
     ;
-ExtraDimensions dims ::=
+DIMENSIONS dims ::=
         "[" "]"
             { Succ Zero }
     |   dims:a "[" "]"
             { Succ a }
     ;
-Exp field_access ::=
+EXPRESSION field_access ::=
         primary:a "." ident:b
             { Field a b }
     |   "super" "." ident:a
@@ -981,7 +983,7 @@ Exp field_access ::=
     |   name_type:a "." "super" "." ident:b
             { Field (Super (Just a)) b }
     ;
-Exp method_invocation ::=
+EXPRESSION method_invocation ::=
         ident:a "(" argument_list_opt:b ")"
             { Call Nothing a b }
     |   primary:a "." ident:b "(" argument_list_opt:c ")"
@@ -991,11 +993,11 @@ Exp method_invocation ::=
     |   name_type:a "." "super" "." ident:b "(" argument_list_opt:c ")"
             { Call (Just (Super (Just a))) b c }
     ;
-Exp array_access ::=
+EXPRESSION array_access ::=
         primary_no_new_array:a "[" expression:b "]"
             { ArrayAccess a b }
     ;
-Exp postfix_expression ::=
+EXPRESSION postfix_expression ::=
         primary:a
             { a }
     |   postincrement_expression:a
@@ -1003,15 +1005,15 @@ Exp postfix_expression ::=
     |   postdecrement_expression:a
             { a }
     ;
-Exp postincrement_expression ::=
+EXPRESSION postincrement_expression ::=
         postfix_expression:a "++"
             { PostIncrement a }
     ;
-Exp postdecrement_expression ::=
+EXPRESSION postdecrement_expression ::=
         postfix_expression:a "--"
             { PostDecrement a }
     ;
-Exp unary_expression ::=
+EXPRESSION unary_expression ::=
         preincrement_expression:a
             { a }
     |   predecrement_expression:a
@@ -1023,15 +1025,15 @@ Exp unary_expression ::=
     |   unary_expression_not_plus_minus:a
             { a }
     ;
-Exp preincrement_expression ::=
+EXPRESSION preincrement_expression ::=
         "++" unary_expression:a
             { PreIncrement a }
     ;
-Exp predecrement_expression ::=
+EXPRESSION predecrement_expression ::=
         "--" unary_expression:a
             { PreDecrement a }
     ;
-Exp unary_expression_not_plus_minus ::=
+EXPRESSION unary_expression_not_plus_minus ::=
         postfix_expression:a
             { a }
     |   "~" unary_expression:a
@@ -1041,11 +1043,11 @@ Exp unary_expression_not_plus_minus ::=
     |   cast_expression:a
             { a }
     ;
-Exp cast_expression ::=
+EXPRESSION cast_expression ::=
         "(" type:a ")" unary_expression:c
             { Cast a c }
     ;
-Exp multiplicative_expression ::=
+EXPRESSION multiplicative_expression ::=
         unary_expression:a
             { a }
     |   multiplicative_expression:a "*" unary_expression:b
@@ -1055,7 +1057,7 @@ Exp multiplicative_expression ::=
     |   multiplicative_expression:a "%" unary_expression:b
             { Mod a b }
     ;
-Exp additive_expression ::=
+EXPRESSION additive_expression ::=
         multiplicative_expression:a
             { a }
     |   additive_expression:a "+" multiplicative_expression:b
@@ -1063,7 +1065,7 @@ Exp additive_expression ::=
     |   additive_expression:a "-" multiplicative_expression:b
             { Sub a b }
     ;
-Exp shift_expression ::=
+EXPRESSION shift_expression ::=
         additive_expression:a
             { a }
     |   shift_expression:a "<<" additive_expression:b
@@ -1073,7 +1075,7 @@ Exp shift_expression ::=
     |   shift_expression:a ">>>" additive_expression:b
             { UShr a b }
     ;
-Exp relational_expression ::=
+EXPRESSION relational_expression ::=
         shift_expression:a
             { a }
     |   relational_expression:a "<" shift_expression:b
@@ -1087,7 +1089,7 @@ Exp relational_expression ::=
     |   relational_expression:a "instanceof" reference_type:b
             { InstanceOf a b }
     ;
-Exp equality_expression ::=
+EXPRESSION equality_expression ::=
         relational_expression:a
             { a }
     |   equality_expression:a "==" relational_expression:b
@@ -1095,49 +1097,49 @@ Exp equality_expression ::=
     |   equality_expression:a "!=" relational_expression:b
             { NotEquals a b }
     ;
-Exp and_expression ::=
+EXPRESSION and_expression ::=
         equality_expression:a
             { a }
     |   and_expression:a "&" equality_expression:b
             { BitAnd a b }
     ;
-Exp exclusive_or_expression ::=
+EXPRESSION exclusive_or_expression ::=
         and_expression:a
             { a }
     |   exclusive_or_expression:a "^" and_expression:b
             { BitXor a b }
     ;
-Exp inclusive_or_expression ::=
+EXPRESSION inclusive_or_expression ::=
         exclusive_or_expression:a
             { a }
     |   inclusive_or_expression:a "|" exclusive_or_expression:b
             { BitOr a b }
     ;
-Exp conditional_and_expression ::=
+EXPRESSION conditional_and_expression ::=
         inclusive_or_expression:a
             { a }
     |   conditional_and_expression:a "&&" inclusive_or_expression:b
             { CondAnd a b }
     ;
-Exp conditional_or_expression ::=
+EXPRESSION conditional_or_expression ::=
         conditional_and_expression:a
             { a }
     |   conditional_or_expression:a "||" conditional_and_expression:b
             { CondOr a b }
     ;
-Exp conditional_expression ::=
+EXPRESSION conditional_expression ::=
         conditional_or_expression:a
             { a }
     |   conditional_or_expression:a "?" expression:b ":" conditional_expression:c
             { Conditional a b c }
     ;
-Exp assignment_expression ::=
+EXPRESSION assignment_expression ::=
         conditional_expression:a
             { a }
     |   assignment:a
             { a }
     ;
-Exp assignment ::=
+EXPRESSION assignment ::=
         left_hand_side:a "=" assignment_expression:c
             { Assign a c }
     |   left_hand_side:a "*=" assignment_expression:c
@@ -1163,11 +1165,11 @@ Exp assignment ::=
     |   left_hand_side:a "|=" assignment_expression:c
             { OrAssign a c }
     ;
-Exp name_expr ::=
-        name:a
+EXPRESSION name_expr ::=
+        ident:a
             { Var a }
     ;
-Exp left_hand_side ::=
+EXPRESSION left_hand_side ::=
         name_expr:a
             { a }
     |   field_access:a
@@ -1175,16 +1177,16 @@ Exp left_hand_side ::=
     |   array_access:a
             { a }
     ;
-(Maybe Exp) expression_opt ::=
+(Maybe EXPRESSION) expression_opt ::=
             { Nothing }
     |   expression:a
             { Just a }
     ;
-Exp expression ::=
+EXPRESSION expression ::=
         assignment_expression:a
             { a }
     ;
-Identifier ident ::=
+IDENTIFIER ident ::=
         IDENTIFIER:a
             { Identifier a }
     ;
