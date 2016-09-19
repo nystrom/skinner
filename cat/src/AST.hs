@@ -82,6 +82,9 @@ data JExp = JNew [JExp] Type
 instance Show JExp where
   show (JNew es t) = "new " ++ show t ++ "(" ++ intercalate ", " (map show es) ++ ")"
   show (JOp op es t) = op ++ "(" ++ intercalate ", " (map show es) ++ ")" ++ " :: " ++ show t
+  show (JK "()" (TCon "void" [])) = "()"
+  show (JK "true" (TCon "boolean" [])) = "true"
+  show (JK "false" (TCon "boolean" [])) = "false"
   show (JK k t) = k ++ " :: " ++ show t
   show (JVar x t) = x ++ " :: " ++ show t
 

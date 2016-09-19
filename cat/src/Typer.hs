@@ -176,6 +176,16 @@ typeCheck (JNew es (TCon k [])) = do
   -- t' <- lookupVar k
   -- unifySubtype (funType' ts (TCon k [])) t'
   return $ JNew es' (TCon k [])
+typeCheck (JOp k es _) = do
+  es' <- mapM typeCheck es
+  let ts = map typeof es'
+  TCon "->" [ts', t'] <- lookupVar k
+  unifySubtype (tupleType ts) ts'
+  unifySubtype t' (TCon k [])
+  unifySubtype (TCon k []) t'
+  -- t' <- lookupVar k
+  -- unifySubtype (funType' ts (TCon k [])) t'
+  return $ JOp k es' (TCon k [])
 typeCheck (JVar x _) = do
   t <- lookupVar x
   case t of

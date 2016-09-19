@@ -330,6 +330,24 @@ generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
 matchName :: Skin -> String -> String -> Int
 matchName skin = matchNameWithAliases (aliases skin)
 
+data M = M Type Type Int M
+       | T
+
+-- matchTypes2 :: Monad m => Skin -> JAST -> m [(Type, Type)]
+-- matchTypes2 skin jast = do
+--   let is = interfaces skin
+--   let js = jinterfaces jast
+--   let ks = jconstructors jast
+--
+--   let matchIJ (JInterface ilabel isuper) (JInterface jlabel jsuper) = do
+--       let cost = matchName skin ilabel jlabel
+--       let costSuper = matchName skin (show isuper) (show jsuper)
+--       M isuper jsuper costSuper (M (TCon ilabel []) (TCon jlabel []) cost T)
+--
+--   let ks = liftM2 matchIJ is js
+--
+--   return []
+
 -- match types in the skin to types in the JAST, rewriting the skin
 -- FIXME: currently this works by matching names using only aliases with no forgiveness
 -- Also, it maps more than one skin type to the same JAST type, which may be broken (but might not be...)
@@ -347,7 +365,7 @@ matchTypes skin jast = do
            in (cost, i, j)
 
   -- Make a substitution with the exact matches.
-  let ks = filter (\(cost, _, _) -> cost <= 0) $ liftM2 match2 js is
+  let ks = filter (\(cost, _, _) -> cost <= 1) $ liftM2 match2 js is
   let substToVoid = map (\i -> (i, JInterface "void" (TCon "Object" []))) is
   debug $ show $ take 10 $ sortOn (\(a,b,c) -> a) ks
   return $ substSkin (map (\(cost, i, j) -> (i, j)) ks ++ substToVoid) skin
@@ -359,27 +377,27 @@ matchTypes skin jast = do
                               tokens = substTokens s (tokens skin),
                               templates = substTemplates s (templates skin) }
 
-    substTemplates s js = map (substTemplate s) js
+    substTemplates s = map (substTemplate s)
     substTemplate s (Template t1 t2 rhs e) = Template (substType s t1) (substType s t2) rhs (substExp s e)
 
-    substTokens s js = map (substToken s) js
+    substTokens s = map (substToken s)
     substToken s (x, t) = (x, substType s t)
 
-    substInterfaces s js = map (substInterface s) js
+    substInterfaces s = map (substInterface s)
     substInterface s (JInterface label super) = JInterface (substLabel s label) (substType s super)
 
-    substCtors s js = map (substCtor s) js
+    substCtors s = map (substCtor s)
     substCtor s (JConstructor label fields super) = JConstructor label (substFields s fields) (substType s super)
 
-    substRules s js = map (substRule s) js
+    substRules s = map (substRule s)
     substRule s (Rule typ label rhs e) = Rule (substType s typ) label rhs (substExp s e)
 
-    substFields s fields = map (substField s) fields
+    substFields s = map (substField s)
     substField s (x,t) = (x, substType s t)
 
     substType s (TCon label ts) = TCon (substLabel s label) (map (substType s) ts)
     substType s (TVar x) = TVar x
-    substType s TBoh = error $ "cannot subst unknown type"
+    substType s TBoh = error $ "cannot type " ++ show TBoh
 
     substLabel [] label = label
     substLabel ((JInterface old _, JInterface new _):rest) label
@@ -390,10 +408,10 @@ matchTypes skin jast = do
       let e' = substExp' s e
       case typeof e' of
         TCon "void" [] -> JK "()" (TCon "void" [])
-        TBoh -> error $ "did not replace type of " ++ show e
         t -> e'
 
     substExp' s (JNew es t) = JNew (map (substExp s) es) (substType s t)
+    -- substExp' s (JNew es t) = JNew (map (substExp s) es) t -- do not substitute classes
     substExp' s (JOp k es t) = JOp k (map (substExp s) es) (substType s t)
     substExp' s (JK k t) = JK k (substType s t)
     substExp' s (JVar x t) = JVar x (substType s t)
@@ -451,9 +469,18 @@ generateRhs hierarchy (JNew es (TCon label [])) = do
   k <- makeKeyword label
   rhs <- mapM (generateRhs hierarchy) es
   return $ (Terminal k, "_") : concat rhs
+generateRhs hierarchy (JOp label es t) = do
+  k <- makeKeyword label
+  rhs <- mapM (generateRhs hierarchy) es
+  return $ (Terminal k, "_") : concat rhs
 generateRhs hierarchy (JVar x t) = do
   lhs <- findLhsForType Subtype hierarchy t
   return [(lhs, x)]
+generateRhs hierarchy (JK label t) = do
+  k <- makeKeyword label
+  return [(Terminal k, "_")]
+generateRhs hierarchy e = do
+  error $ "missing case in generateRhs " ++ show e
 
 makeKeyword :: String -> State Skin String
 makeKeyword s = do

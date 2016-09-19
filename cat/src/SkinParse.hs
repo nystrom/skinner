@@ -122,7 +122,7 @@ application = try $ do
       return $ JOp "Just" [e] TBoh
     x @ (y:_) | isUpper y -> do
       es <- many primary
-      return $ JNew es (TCon x [])
+      return $ JOp x es TBoh
     x -> return $ JVar x TBoh
 
 primary :: Parser JExp
