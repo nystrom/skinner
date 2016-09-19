@@ -176,11 +176,11 @@ datatype = try $ do
   params <- many name
   punct "="
   cases <- (kase params) `sepBy` (punct "|")
-  return $ (JInterface lhs (TCon "Object" []) :
-     map (\(label, children) -> JInterface label (TCon lhs [])) (filter (\(label, _) -> label /= lhs) cases),
-     map (\(label, children) -> JConstructor label (toFields children) (TCon label [])) cases)
-  -- return $ (JInterface lhs (TCon "Object" []) : [],
-  --    map (\(label, children) -> JConstructor label (toFields children) (TCon lhs [])) cases)
+  -- return $ (JInterface lhs (TCon "Object" []) :
+  --    map (\(label, children) -> JInterface label (TCon lhs [])) (filter (\(label, _) -> label /= lhs) cases),
+  --    map (\(label, children) -> JConstructor label (toFields children) (TCon label [])) cases)
+  return $ (JInterface lhs (TCon "Object" []) : [],
+     map (\(label, children) -> JConstructor label (toFields children) (TCon lhs [])) cases)
 
 -- fixme: use actual field names for records
 -- for Java code Add(Exp, Exp) { left = a1, right = a2 }

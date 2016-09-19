@@ -3,14 +3,18 @@ module Main (main) where
 import           Control.Applicative  ((*>), (<$), (<$>), (<*), (<*>))
 import           Control.Monad.Reader
 import           Control.Monad.State
+
 import           Data.Char            (isLower, isUpper, toLower, toUpper)
 import           Data.List            (find, intercalate, minimum, minimumBy,
                                        nub, sortBy, sortOn, (\\))
+import qualified Data.Map             as M
 import           Data.Maybe           (catMaybes, fromMaybe, listToMaybe)
 import           Data.Monoid
 import           Data.Tuple           (swap)
+
 import           Debug.Trace          (trace)
 import           System.Environment   (getArgs)
+
 import           Text.Parsec          (parse)
 import           Text.Parsec.String
 
@@ -19,8 +23,6 @@ import           AST
 import           JASTParse
 import           SkinParse
 import           Typer
--- import TreeMatch3
--- import Synth
 
 -- printf debugging
 debug :: (Monad m) => String -> m ()
@@ -84,7 +86,7 @@ coerce :: SubtypeEnv -> JExp -> Type -> Maybe JExp
 coerce hierarchy e t = go (typeof e) t
   where
     -- s <: t
-    go s t | subtype hierarchy s t = Just e
+    go s t | isSubtype hierarchy s t = Just e
 
     -- don't generate coercions to or from List[List[t]], etc.
     go (TCon "List" [TCon "List" _]) _ = Nothing
@@ -221,12 +223,17 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
 
   let fv = freeVars new
 
-  rs <- forM (factories skin) $ \k @ (JConstructor skinLabel skinFields skinSuper) -> do
+  rs <- forM (factories skin) $ \k @ (JConstructor skinLabel skinFields skinSuper) -> do -- trace ("matching " ++ show k ++ " vs " ++ show new) $ do
 
-    theta <-  -- trace ("matching " ++ show k ++ " with " ++ show new) $ do
+    -- make a substitution that coerces the factory method parameters (skinFields) to the right type for the
+    -- free variables (fv) of the constructor call.
+
+    theta <- do -- trace ("matching " ++ show skinFields ++ " in " ++ show k ++ " with " ++ show fv) $ do
       case (skinFields, fv) of
-        -- HACK: if there are more parameter to the factory than there are free variables in
-        -- the constructor call, try to tuple up the parameters
+        -- HACK: if there are more parameter to the factory method than there are free variables in
+        -- the constructor call, try to group the parameters into a list or array.
+        -- For now, just handle two parameters. This handles the case of binary operators
+        -- that are implemented using lists of operands in the Java AST.
         ([(y1, t1'), (y2, t2')], [(x, TCon "List" [t])]) | t1' == t2' ->
           case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) (TCon "List" [t]) of
             Just e  -> return [(x, e)]
@@ -242,15 +249,18 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
 
         (skinFields, fv) | length skinFields == length fv -> do
 
-          -- We have a call to a constructor in the J AST.
+          -- We have a call to a constructor in the Java AST.
           -- We want to see if we can invoke that constructor from the given factory method in the Skin.
 
           -- To do this, we see if we can coerce each of the parameters of the factory method
           -- into an argument of the constructor call.
 
-          -- We need to cover all arguments to the constructor call (i.e., those that are freeVars of the `new` JExp).
+          -- We need to cover all arguments to the constructor call (i.e., those that are free variables of the `new` JExp).
 
           -- We just assume the free variables and factory parameters are in the same order. This could be relaxed when the types are different.
+          -- In particular, we might have a separate enum parameter that (e.g., PLUS on a BinaryExpression node) that could go anywhere in the parameter list.
+
+          -- TOOD: we need to handle extra arguments like a Position.
 
           otheta <- forM (zip fv skinFields) $ \((x, t), (y, t')) -> -- trace ("coerce " ++ show (y, t') ++ " to " ++ show t) $
             case coerce hierarchy (JVar y t') t of
@@ -277,26 +287,33 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
 matchConstructors e = return $ NoMatch e
 
 
-type SubtypeEnv = [(Type, Type)]
+type SubtypeEnv = M.Map String Type
 
 supertype :: SubtypeEnv -> Type -> Maybe Type
-supertype env (TVar x)           = Nothing
+supertype env TBoh = Nothing
 supertype env (TCon "Object" []) = Nothing
-supertype env t                  = lookup t env
+supertype env (TVar x)           = Just $ TCon "Object" []
+supertype env (TCon label [])    = M.lookup label env
 
-subtype :: SubtypeEnv -> Type -> Type -> Bool
-subtype env t1 (TCon "Object" []) = True
-subtype env t1 t2 | t1 == t2 = True
-subtype env t1 t2 = case supertype env t1 of
+-- lists, arrays, and maybe are covariant
+supertype env (TCon "List" [TCon "Object" []])  = Just $ TCon "Object" []
+supertype env (TCon "List" [t])  = (TCon "List" . return) <$> supertype env t
+supertype env (TCon "Array" [TCon "Object" []])  = Just $ TCon "Object" []
+supertype env (TCon "Array" [t])  = (TCon "Array" . return) <$> supertype env t
+supertype env (TCon "Maybe" [TCon "Object" []])  = Just $ TCon "Object" []
+supertype env (TCon "Maybe" [t])  = (TCon "Maybe" . return) <$> supertype env t
+
+-- primitive types have no direct supertype
+supertype env t | isPrimitive t  = Nothing
+-- other types are subtype of Object
+supertype env t  = Just $ TCon "Object" []
+
+isSubtype :: SubtypeEnv -> Type -> Type -> Bool
+isSubtype env t1 (TCon "Object" []) = True
+isSubtype env t1 t2 | t1 == t2 = True
+isSubtype env t1 t2 = case supertype env t1 of
                    Nothing -> False
-                   Just t  -> subtype env t t2
-
-generateHierarchy :: JAST -> SubtypeEnv
-generateHierarchy jast = [(TCon label [], super) | JInterface label super <- jinterfaces jast]
-                       ++ [(TCon label [], super) | JConstructor label _ super <- jconstructors jast]
-
-generateSkinHierarchy :: Skin -> SubtypeEnv
-generateSkinHierarchy skin = []
+                   Just t  -> isSubtype env t t2
 
 generateFactoryCalls :: JAST -> [JExp]
 generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
@@ -311,17 +328,17 @@ generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
         go [] ess       = removeEnumVars ess
         go (e:rest) ess = go rest (addEnum e ess)
 
-        removeEnumVars ess = filter (not . hasEnumVars) ess
-        hasEnumVars es = any isEnumVar es
+        removeEnumVars = filter (not . hasEnumVars)
+        hasEnumVars = any isEnumVar
         isEnumVar ex = any (`isThisEnumVar` ex) (jenums jast)
         isThisEnumVar (JEnum enum (TCon esuper [])) (JVar x (TCon label [])) | esuper == label = True
         isThisEnumVar _ _ = False
 
         addEnum :: JEnum -> [[JExp]] -> [[JExp]]
-        addEnum e ess = concatMap (addEnum1 e) ess
+        addEnum e = concatMap (addEnum1 e)
 
         addEnum1 :: JEnum -> [JExp] -> [[JExp]]
-        addEnum1 e es = nub $ [map (addEnum2 e) es, es]
+        addEnum1 e es = nub [map (addEnum2 e) es, es]
 
         addEnum2 :: JEnum -> JExp -> JExp
         addEnum2 (JEnum enum (TCon esuper [])) (JVar x (TCon label [])) | esuper == label = JK enum (TCon label [])
@@ -365,7 +382,7 @@ matchTypes skin jast = do
            in (cost, i, j)
 
   -- Make a substitution with the exact matches.
-  let ks = filter (\(cost, _, _) -> cost <= 1) $ liftM2 match2 js is
+  let ks = filter (\(cost, _, _) -> cost <= 0) $ liftM2 match2 js is
   let substToVoid = map (\i -> (i, JInterface "void" (TCon "Object" []))) is
   debug $ show $ take 10 $ sortOn (\(a,b,c) -> a) ks
   return $ substSkin (map (\(cost, i, j) -> (i, j)) ks ++ substToVoid) skin
@@ -408,13 +425,13 @@ matchTypes skin jast = do
       let e' = substExp' s e
       case typeof e' of
         TCon "void" [] -> JK "()" (TCon "void" [])
-        t -> e'
+        t              -> e'
 
-    substExp' s (JNew es t) = JNew (map (substExp s) es) (substType s t)
+    substExp' s (JNew es t)  = JNew (map (substExp s) es) (substType s t)
     -- substExp' s (JNew es t) = JNew (map (substExp s) es) t -- do not substitute classes
     substExp' s (JOp k es t) = JOp k (map (substExp s) es) (substType s t)
-    substExp' s (JK k t) = JK k (substType s t)
-    substExp' s (JVar x t) = JVar x (substType s t)
+    substExp' s (JK k t)     = JK k (substType s t)
+    substExp' s (JVar x t)   = JVar x (substType s t)
 
 removeUnreachableRules :: [Rule] -> [Rule]
 removeUnreachableRules rules = rules  -- remove rules unreachable from the start symbol
@@ -450,12 +467,8 @@ findRules skin ks = filter (ruleInvokes ks) (rules skin)
     matches t _ | isPrimitive t = True
     matches (TCon label []) ks = any (\(JConstructor label' _ _) -> label == label') ks
 
-data Variance = Subtype | Supertype
+data Variance = Covariant | Contravariant
   deriving (Show, Eq)
-
--- Find an appropriate LHS for the given expression.
-findAppropriateLhs :: SubtypeEnv -> JExp -> State Skin Sym
-findAppropriateLhs hierarchy e = findLhsForType Supertype hierarchy (typeof e)
 
   -- find rules with similar types
   -- Method should map to "declaration"
@@ -464,22 +477,23 @@ findAppropriateLhs hierarchy e = findLhsForType Supertype hierarchy (typeof e)
 
 -- Generate the RHS of a rule given the expression.
 -- TODO: add parent type for generating template
-generateRhs :: SubtypeEnv -> JExp -> State Skin [(Sym, String)]
-generateRhs hierarchy (JNew es (TCon label [])) = do
+generateRhs :: Maybe Type -> SubtypeEnv -> JExp -> State Skin [(Sym, String)]
+generateRhs _ _ e | trace ("generateRhs for " ++ show e) False = undefined
+generateRhs parent hierarchy (JNew es (TCon label [])) = do
   k <- makeKeyword label
-  rhs <- mapM (generateRhs hierarchy) es
+  rhs <- mapM (generateRhs parent hierarchy) es
   return $ (Terminal k, "_") : concat rhs
-generateRhs hierarchy (JOp label es t) = do
+generateRhs parent hierarchy (JOp label es t) = do
   k <- makeKeyword label
-  rhs <- mapM (generateRhs hierarchy) es
+  rhs <- mapM (generateRhs parent hierarchy) es
   return $ (Terminal k, "_") : concat rhs
-generateRhs hierarchy (JVar x t) = do
-  lhs <- findLhsForType Subtype hierarchy t
+generateRhs parent hierarchy (JVar x t) = do
+  lhs <- findSymbolForType parent Contravariant hierarchy t
   return [(lhs, x)]
-generateRhs hierarchy (JK label t) = do
+generateRhs parent hierarchy (JK label t) = do
   k <- makeKeyword label
   return [(Terminal k, "_")]
-generateRhs hierarchy e = do
+generateRhs parent hierarchy e =
   error $ "missing case in generateRhs " ++ show e
 
 makeKeyword :: String -> State Skin String
@@ -488,59 +502,75 @@ makeKeyword s = do
   modify (\skin -> skin { tokens = nub $ (k, TCon "void" []) : tokens skin })
   return k
 
-findLhsForType :: Variance -> SubtypeEnv -> Type -> State Skin Sym
-findLhsForType variance hierarchy t = do
+findSymbolForType :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
+findSymbolForType _ _ _ t | trace ("findSymbolForType for " ++ show t) False = undefined
+findSymbolForType parent variance hierarchy t = do
   rs <- gets rules
   ts <- gets tokens
-  let rulesWithRightType = filter (\(Rule rt _ _ _) -> subtype hierarchy rt t) rs
+  let rulesWithRightType = filter (\(Rule rt _ _ _) -> isSubtype hierarchy rt t) rs
   let lhss = nub $ map (\(Rule _ lhs _ _) -> lhs) (trace (show rs) rulesWithRightType)
-  let tokensWithRightType = nub $ filter (\(x, rt) -> subtype hierarchy rt t) ts
+  let tokensWithRightType = nub $ filter (\(x, rt) -> isSubtype hierarchy rt t) ts
   let token = fmap fst (listToMaybe tokensWithRightType)
   case lhss of
     (lhs:_) -> return $ Nonterminal lhs
     [] -> case token of
       Just token -> return $ Terminal token
-      Nothing    -> case t of
-                      -- TCon "Object" [] -> return $ Terminal "IDENTIFIER"
-                      TCon "String" [] -> return $ Terminal "IDENTIFIER"
-                      TCon "int" [] -> return $ Terminal "INT_LITERAL"
-                      TCon "Array" [a] -> do
-                        list <- findLhsForType variance hierarchy (TCon "List" [a])
-                        let name = symname list ++ "_array"
-                        let rule = Rule t name [(list, "as")] (JOp "listToArray" [JVar "as" (TCon "List" [a])] t)
-                        modify (\skin -> skin { rules = rule : rules skin })
-                        return $ Nonterminal name
-                      TCon "List" [a] -> do
-                        token <- findLhsForType variance hierarchy a
-                        let lp = (Terminal "(", "_")
-                        let rp = (Terminal ")", "_")
-                        let listName = symname token ++ "_list"
-                        let name = symname token ++ "_list_brackets"
-                        let list = (Nonterminal listName, "as")
-                        let one = (token, "a")
-                        let comma = (Terminal ",", "_")
-                        let rule1 = Rule (TCon "List" [a]) listName [one] (JOp ":" [JVar "a" a, JK "Nil" (TCon "List" [a])] (TCon "List" [a]))
-                        let rule2 = Rule (TCon "List" [a]) listName [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
-                        let rule3 = Rule t name [lp, list, rp] (JVar "as" t)
-                        let rule4 = Rule t name [lp, rp] (JK "Nil" t)
-                        modify (\skin -> skin { rules = rule1 : rule2 : rule3 : rule4 : rules skin })
-                        return $ Nonterminal name
-                      t -> case variance of
-                        Subtype -> do
-                          -- if the type is builtin, generate rules for that type (arrays and lists and maybe)
-                          -- if the type is not builtin, just return a new Nonterminal
-                          -- error $ "missing case " ++ show t
-                          trace ("hierarchy = " ++ show hierarchy) $
-                            case lookup t hierarchy of
-                              Just s  -> findLhsForType Subtype hierarchy s
-                              Nothing -> error $ "missing case " ++ show t
-                        Supertype -> do
-                          -- FIXME
-                          trace ("hierarchy = " ++ show hierarchy) $
-                            case map fst $ filter (\(t1,t2) -> t2 == t) hierarchy of
-                              (s:_) -> findLhsForType Supertype hierarchy s
-                              []    -> error $ "missing case " ++ show t
-
+      Nothing    -> do
+        -- templateMatches <- case parent of
+        --   Nothing -> return []
+        --   Just u -> do
+        --     tms <- gets templates
+        --     return $ filter (\(Template parentType childType rhs action) -> u == parentType && t == childType) tms
+        let templateMatches = []
+        case templateMatches of
+          -- [Template _ _ rhs action] -> do
+          --   let name = show t
+          --   let rule = Rule t name rhs action
+          --   modify (\skin -> skin { rules = rule : rules skin })
+          --   return $ Nonterminal name
+          _ ->
+            case t of
+              -- TCon "Object" [] -> return $ Terminal "IDENTIFIER"
+              -- TODO: use the templates for these.
+              TCon "String" [] -> return $ Terminal "IDENTIFIER"
+              TCon "int" [] -> return $ Terminal "INT_LITERAL"
+              TCon "Array" [a] -> do
+                list <- findSymbolForType parent variance hierarchy (TCon "List" [a])
+                let name = symname list ++ "_array"
+                let rule = Rule t name [(list, "as")] (JOp "listToArray" [JVar "as" (TCon "List" [a])] t)
+                modify (\skin -> skin { rules = rule : rules skin })
+                return $ Nonterminal name
+              TCon "List" [a] -> do
+                token <- findSymbolForType parent variance hierarchy a
+                let lp = (Terminal "(", "_")
+                let rp = (Terminal ")", "_")
+                let listName = symname token ++ "_list"
+                let name = symname token ++ "_list_brackets"
+                let list = (Nonterminal listName, "as")
+                let one = (token, "a")
+                let comma = (Terminal ",", "_")
+                let rule1 = Rule (TCon "List" [a]) listName [one] (JOp ":" [JVar "a" a, JK "Nil" (TCon "List" [a])] (TCon "List" [a]))
+                let rule2 = Rule (TCon "List" [a]) listName [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
+                let rule3 = Rule t name [lp, list, rp] (JVar "as" t)
+                let rule4 = Rule t name [lp, rp] (JK "Nil" t)
+                modify (\skin -> skin { rules = [rule1, rule2, rule3, rule4] ++ rules skin })
+                return $ Nonterminal name
+              TCon label [] -> case variance of
+                -- Covariant -> error $ "missing case in findSymbolForType: looking for supertype of " ++ show t
+                -- Contravariant -> error $ "missing case in findSymbolForType: looking for subtype of " ++ show t
+                Covariant ->
+                  -- if the type is builtin, generate rules for that type (arrays and lists and maybe)
+                  -- if the type is not builtin, just return a new Nonterminal
+                  -- error $ "missing case " ++ show t
+                  trace ("hierarchy = " ++ show hierarchy) $
+                    case M.lookup label hierarchy of
+                      Just s  -> findSymbolForType parent Covariant hierarchy s
+                      Nothing -> error $ "missing case in findSymbolForType: looking for supertype of " ++ show t
+                Contravariant ->
+                  trace ("hierarchy = " ++ show hierarchy) $
+                    case map fst $ filter (\(t1,t2) -> t2 == t) (M.toList hierarchy) of
+                      (s:_) -> findSymbolForType parent Contravariant hierarchy (TCon s [])
+                      []    -> error $ "missing case in findSymbolForType: looking for subtype of " ++ show t
 
 parseAndCheck p filename = do
   r <- parseFromFile p filename
@@ -552,12 +582,12 @@ parseAndCheck p filename = do
 
 makeNewRules :: [MatchResult] -> SubtypeEnv -> State Skin ()
 makeNewRules matchResults hierarchy = do
-  forM matchResults $ \r -> case r of
+  forM_ matchResults $ \r -> case r of
     NoMatch e -> do
-      rhs <- generateRhs hierarchy e
-      Nonterminal lhs <- findAppropriateLhs hierarchy e
+      Nonterminal lhs <- findSymbolForType Nothing Covariant hierarchy (typeof e)
+      rhs <- generateRhs (Just (typeof e)) hierarchy e
       let rule = Rule (typeof e) lhs rhs e
-      modify (\skin -> skin { rules = rule : (rules skin) })
+      modify (\skin -> skin { rules = rule : rules skin })
       return ()
     _ -> return ()
   return ()
@@ -589,7 +619,7 @@ main = do
   -- Type-check again... This is just a sanity check that matchTypes didn't mess up the types
   typeCheckSkin skin'
 
-  let hierarchy = generateHierarchy jast ++ generateSkinHierarchy skin'
+  let hierarchy = makeHierarchy (jinterfaces jast) []
 
   let jcalls = generateFactoryCalls jast
   debug $ "jcalls:\n" ++ intercalate "\n" (map show jcalls)
@@ -610,46 +640,27 @@ main = do
 
   -- For each unmatched constructor, generate a new factory method and generate a new rule that invokes that method.
 
+  putStrLn "original rules (with types subst'ed)"
   forM_ (rules skin') print
+  putStrLn "<< original rules (with types subst'ed)"
 
-  let skin'' = execState (makeNewRules matchResults hierarchy) skin'
+  -- Unlike when matching, include the constructors in the subtype hierarchy when generating new rules.
+  let hierarchy2 = makeHierarchy (jinterfaces jast) (jconstructors jast)
+  -- let hierarchy2 = M.insert "Method" (TCon "Declaration" []) hierarchy
+  let skin'' = execState (makeNewRules matchResults hierarchy2) skin'
 
+  putStrLn "new rules"
   forM_ (rules skin'') print
+  putStrLn "<< new rules"
 
   -- Need to prune the grammar.
   -- Starting at root symbol ("goal")
   -- eliminate rhs symbols that aren't covered by the factory calls
 
-{-
-  -- To synthesize a rule from a Java constructor:
-  -- First: rule placement (what's the LHS?)
-  -- Second: Syntax... "learn" the syntax for an Exp with a Type child, a Stm with a Exp child, etc.
+  let skin''' = skin'' { rules = removeUnreachableRules (rules skin'') }
 
-  -- match the skin AST with the Java AST
-  let (cost, caseMatches, typeMatches) = matchConstructorsToSkinAST skin javaConstructors
-  debug $ "cost " ++ show cost
-  debug $ "case " ++ intercalate "\n" (map show caseMatches)
-  debug $ "type " ++ intercalate "\n" (map show typeMatches)
-
-  -- generate new rules
-  newRules <- generateNewRules javaConstructors caseMatches
-  debug $ "new rules = " ++ show newRules
-
-  let simp (ctor, c) = [(ctor, c, TCon "void" [])]
-      modelMap = concatMap simp caseMatches
-
-  debug "new grammar"
-
-  forM_ (rules skin ++ newRules) $ \(Rule t lhs rhs action) -> do
-      case synthFromModel action t modelMap of
-        Nothing -> return ()
-        Just x -> do
-          debug $ "RULE"
-          debug $ "  " ++ lhs ++ " ::= " ++ show rhs
-          debug $ "  " ++ show action ++ " :: " ++ show t
-          debug $ "  " ++ x
--}
-
-  let skin'' = skin { rules = removeUnreachableRules (rules skin') }
+  putStrLn "removed unreachable rules"
+  forM_ (rules skin''') print
+  putStrLn "<< removed unreachable rules"
 
   return ()

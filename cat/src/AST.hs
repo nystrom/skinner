@@ -1,22 +1,22 @@
 module AST where
 
-import Data.Monoid
-import Data.List (intercalate)
+import           Data.List   (intercalate)
+import           Data.Monoid
 
 data Skin = Skin {
-  langname :: String,
+  langname   :: String,
   interfaces :: [JInterface],
-  factories :: [JConstructor],
-  tokens :: [(String, Type)],
-  aliases :: [[String]],
-  templates :: [Template],
-  rules :: [Rule]
+  factories  :: [JConstructor],
+  tokens     :: [(String, Type)],
+  aliases    :: [[String]],
+  templates  :: [Template],
+  rules      :: [Rule]
 } deriving Show
 
 data JAST = JAST {
   jconstructors :: [JConstructor],
-  jenums :: [JEnum],
-  jinterfaces :: [JInterface]
+  jenums        :: [JEnum],
+  jinterfaces   :: [JInterface]
 } deriving Show
 
 data JInterface = JInterface String Type
@@ -89,17 +89,17 @@ instance Show JExp where
   show (JVar x t) = x ++ " :: " ++ show t
 
 typeof :: JExp -> Type
-typeof (JNew es t) = t
+typeof (JNew es t)   = t
 typeof (JOp op es t) = t
-typeof (JK k t) = t
-typeof (JVar x t) = t
+typeof (JK k t)      = t
+typeof (JVar x t)    = t
 
 data Sym = Nonterminal String | Terminal String
   deriving (Show, Eq, Ord)
 
 symname :: Sym -> String
 symname (Nonterminal x) = x
-symname (Terminal x) = x
+symname (Terminal x)    = x
 
 instance Ord Rule where
   compare (Rule t1 lhs1 rhs1 _) (Rule t2 lhs2 rhs2 _) =

@@ -1,4 +1,4 @@
-module Typer (typeCheckSkin) where
+module Typer (typeCheckSkin, makeHierarchy) where
 
 import           Control.Monad.Identity
 import           Control.Monad.Reader
@@ -6,7 +6,7 @@ import           Control.Monad.State
 
 import           Control.Applicative    ((<$>))
 import           Data.Char              (isLower, isUpper)
-import           Data.List              ((\\), intersect)
+import           Data.List              (intersect, (\\))
 import           Data.Maybe             (catMaybes, fromMaybe, isNothing,
                                          mapMaybe)
 
@@ -38,10 +38,10 @@ s1 @@ s2 = s5
   where
     s3 = [(u, substTy s1 t) | (u,t) <- s2, isNothing (lookup u s1)]
     s4 = do
-      u <- (map fst s1) `intersect` (map fst s2)
+      u <- map fst s1 `intersect` map fst s2
       case lookup u s2 of
         Just (TVar v) -> return (v, substTy s1 (TVar u))
-        Just t -> return (u, substTy s1 t)
+        Just t        -> return (u, substTy s1 t)
     s5 = s3 ++ s4 ++ s1
 
 merge s1 s2 = s1 @@ s2
@@ -54,7 +54,7 @@ mgu h t1 t2 = go t1 t2
     go (TVar a) (TVar b) | b < a  = [(b,TVar a)]
     go (TVar a) t                 = [(a,t)]
     go t (TVar a)                 = [(a,t)]
-    go (TCon "->" [s1,t1]) (TCon "->" [s2,t2]) = concat $ [go s2 s1, go t1 t2]  -- handle contravariant function arguments
+    go (TCon "->" [s1,t1]) (TCon "->" [s2,t2]) = go s2 s1 ++ go t1 t2           -- handle contravariant function arguments
     go (TCon a as) (TCon b bs) | a == b = concat $ zipWith go as bs             -- other type constructors are covariant
     go (TCon a []) (TCon b []) = trace ("go " ++ a ++ " ~ " ++ b) $ case M.lookup a h of
                                     Just (TCon s []) -> go (TCon s []) (TCon b [])
@@ -78,7 +78,7 @@ addBindings bindings env = env {
   }
 
 rhsBindings rhs env =
-  trace ("bindings for " ++ show rhs ++ " = " ++ show (map f rhs)) $
+  -- trace ("bindings for " ++ show rhs ++ " = " ++ show (map f rhs)) $
     addBindings (mapMaybe f rhs) env
   where
     f (Nonterminal sym, "_")  = Nothing
@@ -181,16 +181,16 @@ typeCheck (JOp k es _) = do
   let ts = map typeof es'
   TCon "->" [ts', t'] <- lookupVar k
   unifySubtype (tupleType ts) ts'
-  unifySubtype t' (TCon k [])
-  unifySubtype (TCon k []) t'
+  -- unifySubtype t' (TCon k [])
+  -- unifySubtype (TCon k []) t'
   -- t' <- lookupVar k
   -- unifySubtype (funType' ts (TCon k [])) t'
-  return $ JOp k es' (TCon k [])
+  return $ JOp k es' t'
 typeCheck (JVar x _) = do
   t <- lookupVar x
   case t of
     TBoh -> error $ "type of " ++ x ++ " in environment was " ++ show t
-    _ -> return ()
+    _    -> return ()
   return $ JVar x t
 typeCheck e =
   error $ "missing case " ++ show e
@@ -236,21 +236,19 @@ makeHierarchy is fs = h
   where
     h0 = M.empty
     h1 = foldl (\m (JInterface label super) -> M.insert label super m) h0 is
-    -- h2 = foldl (\m (JConstructor label _ super) -> M.insert label super m) h1 fs
-    h2 = h1
+    h2 = foldl (\m (JConstructor label _ super) -> if super /= TCon label [] then M.insert label super m else m) h1 fs
+    -- h2 = h1
     h3 = M.insert "String" (TCon "Object" []) h2
     h = h3
 
 typeCheckSkin :: Skin -> IO Skin
 typeCheckSkin skin = do
   -- Type check the rules in the grammar rules
-  let subtypeHierarchy = makeHierarchy (interfaces skin) (factories skin)
+  let subtypeHierarchy = makeHierarchy (interfaces skin) [] -- (factories skin)
   let (rules', templates') = runTC subtypeHierarchy $ typeCheckRules (tokens skin) (factories skin) (rules skin) (templates skin)
   return skin { rules = rules', templates = templates' }
 
 substTy :: Subst -> Type -> Type
-substTy s t @ (TVar x) = case lookup x s of
-                           Just t' -> t'
-                           Nothing -> t
+substTy s t @ (TVar x)    = fromMaybe t (lookup x s)
 substTy s (TCon label ts) = TCon label (map (substTy s) ts)
-substTy s TBoh = TBoh
+substTy s TBoh            = TBoh
