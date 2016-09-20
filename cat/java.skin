@@ -57,6 +57,7 @@ alias actual argument
 alias formal formal_parameter
 alias if if_then if_then_else cond conditional
 alias cond conditional
+alias declaration decl definition def
 
 ast
 
