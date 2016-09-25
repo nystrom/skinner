@@ -13,6 +13,23 @@ build-type:          Simple
 extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
+executable cat-profiling
+  main-is:             Main.hs
+
+  build-depends:       base >=4.9 && <4.10, containers >=0.5 && <0.6, mtl >=2.2 && <2.3, parsec >=3.1 && <3.2, hmatrix-glpk >=0.5 && <0.6, random >=1.0, random-shuffle
+
+  -- Directories containing source files.
+  hs-source-dirs:      src
+
+  -- Base language which the package is written in.
+  default-language:    Haskell2010
+
+  ghc-options:
+    -O2
+    -threaded
+    -fprof-auto
+    "-with-rtsopts=-N -p -s -h -i0.1 -xc"
+
 executable cat
   main-is:             Main.hs
 
@@ -22,7 +39,7 @@ executable cat
   -- other-extensions:
 
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.9 && <4.10, containers >=0.5 && <0.6, mtl >=2.2 && <2.3, parsec >=3.1 && <3.2, hmatrix-glpk >=0.5 && <0.6
+  build-depends:       base >=4.9 && <4.10, containers >=0.5 && <0.6, mtl >=2.2 && <2.3, parsec >=3.1 && <3.2, hmatrix-glpk >=0.5 && <0.6, random >=1.0, random-shuffle
 
   -- Directories containing source files.
   hs-source-dirs:      src
