@@ -14,9 +14,12 @@ data Skin = Skin {
 } deriving Show
 
 data JAST = JAST {
+  jinterfaces   :: [JInterface],
   jconstructors :: [JConstructor],
   jenums        :: [JEnum],
-  jinterfaces   :: [JInterface]
+  jexps         :: [JExp],
+  jheader       :: String,
+  jbody         :: String
 } deriving Show
 
 data JInterface = JInterface String Type

@@ -20,35 +20,54 @@ import AST
 debug :: (Monad m) => String -> m ()
 debug s = trace s (return ())
 
-data Decl = Decl1 JConstructor | Decl2 JInterface | Decl3 JEnum
+data Decl = Decl1 JConstructor | Decl2 JInterface | Decl3 JEnum | Decl4 JExp
+
+header :: Parser String
+header = do
+  reserved "%header"
+  manyTill anyChar (lookAhead (char '%' *> return ()) <|> eof)
+
+body :: Parser String
+body = do
+  reserved "%body"
+  manyTill anyChar (lookAhead (char '%' *> return ()) <|> eof)
 
 -- parser
 -- For now: factories == data types
 javaAST :: Parser JAST
 javaAST = do
   ws
-  rs <- concat <$> many1 (return <$> (Decl1 <$> klass) <|> return <$> (Decl2 <$> abstractKlass) <|> (map Decl3) <$> enum)
+  rs <- concat <$> many1 (return <$> (Decl1 <$> klass) <|> return <$> (Decl2 <$> abstractKlass) <|> return <$> (Decl4 <$> expression) <|> map Decl3 <$> enum)
+  h <- option "" header
+  b <- option "" body
   eof
   return $ JAST { jconstructors = decl1 rs,
                   jinterfaces = decl2 rs,
-                  jenums = decl3 rs }
+                  jenums = decl3 rs,
+                  jexps = decl4 rs,
+                  jheader = h,
+                  jbody = b }
   where
-    decl1 (Decl1 k:rs) = [k] ++ decl1 rs
+    decl1 (Decl1 k:rs) = k:decl1 rs
     decl1 (_:rs) = decl1 rs
     decl1 [] = []
-    decl2 (Decl2 k:rs) = [k] ++ decl2 rs
+    decl2 (Decl2 k:rs) = k:decl2 rs
     decl2 (_:rs) = decl2 rs
     decl2 [] = []
-    decl3 (Decl3 k:rs) = [k] ++ decl3 rs
+    decl3 (Decl3 k:rs) = k:decl3 rs
     decl3 (_:rs) = decl3 rs
     decl3 [] = []
+    decl4 (Decl4 k:rs) = k:decl4 rs
+    decl4 (_:rs) = decl4 rs
+    decl4 [] = []
 
 enum :: Parser [JEnum]
 enum = try $ do
   reserved "enum"
   lhs <- name
-  punct "="
-  names <- name `sepBy` (punct "|")
+  punct "{"
+  names <- name `sepBy` (punct ",")
+  punct "}"
   return $ map (\label -> JEnum label (TCon lhs [])) names
 
 abstractKlass :: Parser JInterface
@@ -70,6 +89,30 @@ klass = do
   reserved "extends"
   super <- name
   return $ JConstructor k fields (TCon super [])
+
+expression = do
+  try new <|> ctor <|> cast
+
+ctor = do
+  k <- name
+  case k of
+    (x:_) | isUpper x -> return $ JK k TBoh
+    k -> return $ JVar k TBoh
+
+cast = do
+  punct "("
+  t <- jtype
+  punct ")"
+  k <- name
+  return $ JVar k t
+
+new = do
+  reserved "new"
+  k <- name
+  punct "("
+  args <- expression `sepBy` (punct ",")
+  punct ")"
+  return $ JNew args (TCon k [])
 
 formal :: Parser (String, Type)
 formal = do
@@ -96,8 +139,8 @@ jtype = do
 
 lexer = P.makeTokenParser
   (haskellDef
-  { P.reservedNames = ["abstract", "class", "extends", "enum"],
-    P.reservedOpNames = ["[", "]", ";", "{", "}", "(", ")", "<", ">"] })
+  { P.reservedNames = ["abstract", "class", "extends", "enum", "%header", "%body", "new"],
+    P.reservedOpNames = ["[", "]", ";", "{", "}", "(", ")", "<", ">", "%"] })
 
 name = P.identifier lexer
 reserved = P.reserved lexer

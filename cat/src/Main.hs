@@ -6,14 +6,16 @@ import           Control.Monad.State
 
 import           Data.Char            (isLower, isUpper, toLower, toUpper)
 import           Data.List            (find, intercalate, minimum, minimumBy,
-                                       nub, sortBy, sortOn, (\\))
+                                       nub, sortBy, sortOn, (\\), permutations)
 import qualified Data.Map             as M
 import           Data.Maybe           (catMaybes, fromMaybe, listToMaybe)
 import           Data.Monoid
 import           Data.Tuple           (swap)
 
 import           Debug.Trace          (trace)
+
 import           System.Environment   (getArgs)
+import           System.Random
 
 import           Text.Parsec          (parse)
 import           Text.Parsec.String
@@ -347,53 +349,34 @@ generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
 matchName :: Skin -> String -> String -> Int
 matchName skin = matchNameWithAliases (aliases skin)
 
-data M = M Type Type Int M
-       | T
-
--- matchTypes2 :: Monad m => Skin -> JAST -> m [(Type, Type)]
--- matchTypes2 skin jast = do
---   let is = interfaces skin
---   let js = jinterfaces jast
---   let ks = jconstructors jast
---
---   let matchIJ (JInterface ilabel isuper) (JInterface jlabel jsuper) = do
---       let cost = matchName skin ilabel jlabel
---       let costSuper = matchName skin (show isuper) (show jsuper)
---       M isuper jsuper costSuper (M (TCon ilabel []) (TCon jlabel []) cost T)
---
---   let ks = liftM2 matchIJ is js
---
---   return []
-
--- match types in the skin to types in the JAST, rewriting the skin
+-- match types skinhe JAST, rewriting the skin
 -- FIXME: currently this works by matching names using only aliases with no forgiveness
 -- Also, it maps more than one skin type to the same JAST type, which may be broken (but might not be...)
 -- Should, for instance, map both skin Stm and Exp to JAST Expr.
 -- TODO: map unmapped types to Void and prune the actions and collapse types.
 -- Thus, for an untyped language, want to map Formal to (Type,String) to (void,String) to String.
 -- Mapping should perform coercions too... we should combine all this with the factory/constructor mapping.
-matchTypes :: Monad m => Skin -> JAST -> m Skin
+matchTypes :: Skin -> JAST -> IO Skin
 matchTypes skin jast = do
-  debug "match types"
-  let is = interfaces skin
-  let js = jinterfaces jast
-  let match2 (j @ (JInterface label _)) (i @ (JInterface skinLabel _)) =
-         let cost = matchName skin skinLabel label
-           in (cost, i, j)
+  let randomList seed = randoms (mkStdGen seed) :: [Probability]
+  seed <- randomIO
 
-  -- Make a substitution with the exact matches.
-  let ks = filter (\(cost, _, _) -> cost <= 0) $ liftM2 match2 js is
-  let substToVoid = map (\i -> (i, JInterface "void" (TCon "Object" []))) is
-  debug $ show $ take 10 $ sortOn (\(a,b,c) -> a) ks
-  return $ substSkin (map (\(cost, i, j) -> (i, j)) ks ++ substToVoid) skin
+  putStrLn "new type matcher"
+  let mapping = matchTypesMetropolis (randomList seed) skin jast
+  print mapping
+  putStrLn "<< new type matcher"
 
+  let substToVoid = map (\i -> (toType i, TCon "void" [])) (interfaces skin)
+  return $ substSkin (mapping ++ substToVoid) skin
+
+
+substSkin :: TypeMapping -> Skin -> Skin
+substSkin s skin = skin { interfaces = substInterfaces s (interfaces skin),
+                          factories = substCtors s (factories skin),
+                          rules = substRules s (rules skin),
+                          tokens = substTokens s (tokens skin),
+                          templates = substTemplates s (templates skin) }
   where
-    substSkin s skin = skin { interfaces = substInterfaces s (interfaces skin),
-                              factories = substCtors s (factories skin),
-                              rules = substRules s (rules skin),
-                              tokens = substTokens s (tokens skin),
-                              templates = substTemplates s (templates skin) }
-
     substTemplates s = map (substTemplate s)
     substTemplate s (Template t1 t2 rhs e) = Template (substType s t1) (substType s t2) rhs (substExp s e)
 
@@ -417,7 +400,7 @@ matchTypes skin jast = do
     substType s TBoh = error $ "cannot type " ++ show TBoh
 
     substLabel [] label = label
-    substLabel ((JInterface old _, JInterface new _):rest) label
+    substLabel ((TCon old _, TCon new _):rest) label
       | label == old = new
       | otherwise    = substLabel rest label
 
@@ -433,16 +416,184 @@ matchTypes skin jast = do
     substExp' s (JK k t)     = JK k (substType s t)
     substExp' s (JVar x t)   = JVar x (substType s t)
 
-removeUnreachableRules :: [Rule] -> [Rule]
-removeUnreachableRules rules = rules  -- remove rules unreachable from the start symbol
-                                      -- TODO TODO TODO
+-- Remove all unused factories.
+-- Remove any rule that calls a dead factory.
+-- Remove any dead nonterminals from RHSs. If this causes a rule to become an epsilon rule, remove the rule.
+-- Repeat...
+removeUnreachableRules :: String -> Skin -> JAST -> [Rule]
+removeUnreachableRules start skin jast = filter (`elem` covered) (rules skin)
+  where
+    covered = findCoveredRules skin (jconstructors jast)
+
+    reachable = go (findRulesFor start (rules skin)) [start]
+
+    actionUsed (Rule t lhs rhs action) = False
+
+    -- remove any rules where the action calls a non matched factory
+    -- remove any dead nonterminals from RHS
+    -- remove any unusued nonterminals
+    go frontier visited = rules
+
+    findRulesFor lhs = filter (\(Rule _ x _ _) -> lhs == x)
+
 
 data MatchResult = Match Int JConstructor JExp
                  | NoMatch JExp
   deriving Show
 
-findRules :: Skin -> [JConstructor] -> [Rule]
-findRules skin ks = filter (ruleInvokes ks) (rules skin)
+type Probability = Double
+type TypeMapping = [(Type, Type)]
+
+class ConvertToType a where
+  toType :: a -> Type
+
+instance ConvertToType JInterface where
+  toType (JInterface label _) = TCon label []
+
+instance ConvertToType JConstructor where
+  toType (JConstructor label _ _) = TCon label []
+
+-- generate a random mapping, then improve using the Metropolis algorithm
+matchTypesMetropolis :: [Probability] -> Skin -> JAST -> TypeMapping
+matchTypesMetropolis randoms skin jast = result
+  where
+    is :: [Type]
+    is = map toType (interfaces skin) ++ map toType (factories skin)
+
+    js :: [Type]
+    js = map toType (jinterfaces jast)  ++ map toType (jconstructors jast)
+
+    ihierarchy :: M.Map String Type
+    ihierarchy = makeHierarchy (interfaces skin) (factories skin)
+
+    jhierarchy :: M.Map String Type
+    jhierarchy = makeHierarchy (jinterfaces jast) (jconstructors jast)
+
+    result :: TypeMapping
+    result = evalState findMapping randoms
+
+    nextRandom :: State [Probability] Probability
+    nextRandom = do
+      randoms <- get
+      put (tail randoms)
+      return (head randoms)
+
+    randomIndex :: Int -> State [Probability] Int
+    randomIndex n = do
+      j <- nextRandom
+      let k = round $ j * fromIntegral n
+      if k < 0 || k >= n
+        then randomIndex n
+        else return k
+
+    -- Not the best shuffling algorithm, but works for our purposes.
+    -- System.Random.Shuffle is obscure.
+    shuffle :: [a] -> State [Probability] [a]
+    shuffle xs = case xs of
+      [] -> return []
+      [x] -> return [x]
+      xs -> do
+        let n = length xs
+        j <- randomIndex n
+        as <- shuffle (drop j xs)
+        bs <- shuffle (take j xs)
+        return $ as ++ bs
+
+    crossProduct :: [a] -> [b] -> [(a, b)]
+    crossProduct = liftM2 (,)
+
+    -- all possible mappings (including duplicates)
+    universe :: TypeMapping
+    universe = crossProduct is js
+
+    -- generate a random mapping, but don't map an i to more than one j
+    initialMapping :: State [Probability] TypeMapping
+    initialMapping = do
+      es <- filterM selectEdge universe
+      es' <- shuffle es
+      return $ removeDups es
+
+    removeDups :: TypeMapping -> TypeMapping
+    removeDups es = go es []
+      where
+        go [] acc = acc
+        go ((i,j):rest) acc =
+              go rest ((i,j):filter (\(i',j') -> i /= i') acc)
+
+    findMapping :: State [Probability] TypeMapping
+    findMapping = do
+      ijs <- initialMapping
+      iterateMapping numIterations ijs
+
+    -- Metropolis algorithm parameters
+    beta = fromIntegral $ length is + length js
+    f ijs = exp $ fromIntegral (- beta * cost ijs)
+    alpha ijs ijs' = min 1 (f ijs' / f ijs)
+    edgeSelectionThreshold = min 0.7 (fromIntegral (length js) / fromIntegral (length is))
+    numIterations = 30 * (length is + length js)
+
+    iterateMapping :: Int -> TypeMapping -> State [Probability] TypeMapping
+    iterateMapping iters ijs =
+      if iters == 0
+        then
+          return ijs
+        else do
+          ijs' <- nextMapping ijs
+          r <- nextRandom
+          if r < alpha ijs ijs'
+            then iterateMapping (iters-1) ijs'
+            else iterateMapping (iters-1) ijs
+
+    selectEdge :: (Type, Type) -> State [Probability] Bool
+    selectEdge (i,j) = do
+      r <- nextRandom
+      return $ r < edgeSelectionThreshold
+
+    cost :: [(Type, Type)] -> Int
+    cost edges = sum (map subtypeViolationCost (crossProduct edges edges) ++ map siblingViolationCost (crossProduct edges edges) ++ map arityViolationCost edges ++ map renamingCost edges) + missingCost edges is js
+
+    missingCost :: [(Type, Type)] -> [Type] -> [Type] -> Int
+    missingCost edges is js = length is - length edges
+
+    subtypeViolationCost :: ((Type, Type), (Type, Type)) -> Int
+    subtypeViolationCost ((i,j), (i',j')) = length $ filter id [isSubtype ihierarchy i i' /= isSubtype jhierarchy j j',
+                                                                isSubtype ihierarchy i' i /= isSubtype jhierarchy j' j]
+
+    siblingViolationCost :: ((Type, Type), (Type, Type)) -> Int
+    siblingViolationCost ((i,j), (i',j')) = if (supertype ihierarchy i == supertype ihierarchy i') /= (supertype jhierarchy j == supertype jhierarchy j')
+                                              then 1
+                                              else 0
+
+    arityViolationCost :: (Type, Type) -> Int
+    arityViolationCost (i, j) = 0
+
+    renamingCost :: (Type, Type) -> Int
+    renamingCost (TCon i [], TCon j []) = if i == j then 0 else matchName skin i j + matchName skin j i
+    renamingCost (_, _) = 99999
+
+    -- randomly delete some mappings
+    nextMapping :: TypeMapping -> State [Probability] TypeMapping
+    nextMapping mapping = do
+      r <- nextRandom
+      firstPart <- if r < 0.7
+                    then do
+                      k <- randomIndex (length mapping)
+                      return $ take k mapping ++ drop (k+1) mapping
+                    else
+                      return mapping
+      r <- nextRandom
+      secondPart <- if r < 0.7
+                      then do
+                        es <- initialMapping
+                        k <- randomIndex (length es)
+                        return $ take 1 (drop k es)
+                      else
+                        return []
+      return $ firstPart ++ removeDups secondPart
+
+-- find all the covered rules
+findCoveredRules :: Skin -> [JConstructor] -> [Rule]
+findCoveredRules skin ks = filter (ruleInvokes ks) (rules skin)
   where
     ruleInvokes ks (Rule t lhs rhs e) = expInvokes ks e
 
@@ -596,11 +747,15 @@ main :: IO ()
 main = do
   -- Parse arguments
   args <- getArgs
-
   when (length args /= 2) $ error "usage: cat skin-file ast-file"
 
   let skinFile = head args
   let astFile = head (tail args)
+
+  run skinFile astFile
+
+run :: String -> String -> IO ()
+run skinFile astFile = do
 
   -- read the skin and the java AST files
   skin <- parseAndCheck skin skinFile
@@ -610,24 +765,27 @@ main = do
   debug $ "Java AST:\n" ++ show jast
 
   typedSkin <- typeCheckSkin skin
+  typedJast <- typeCheckJAST jast
+
+  debug $ "Typed Java AST:\n" ++ show typedJast
 
   -- match types between the skin and the JAST, rewriting the skin
   -- to use the JAST types.
-  skin' <- matchTypes typedSkin jast
-  debug $ "skin': " ++ show skin'
+  matchedSkin <- matchTypes typedSkin typedJast
+  debug $ "matchedSkin: " ++ show matchedSkin
 
   -- Type-check again... This is just a sanity check that matchTypes didn't mess up the types
-  typeCheckSkin skin'
+  typeCheckSkin matchedSkin
 
-  let hierarchy = makeHierarchy (jinterfaces jast) []
+  let hierarchy = makeHierarchy (jinterfaces typedJast) []
 
-  let jcalls = generateFactoryCalls jast
+  let jcalls = jexps typedJast
   debug $ "jcalls:\n" ++ intercalate "\n" (map show jcalls)
 
   debug "Matching AST with skin:"
   matchResults <- forM jcalls $ \k -> case k of
     JNew args t ->
-      return $ runReader (matchConstructors k) (skin', hierarchy)
+      return $ runReader (matchConstructors k) (matchedSkin, hierarchy)
     _ ->
       return $ NoMatch k
 
@@ -641,26 +799,26 @@ main = do
   -- For each unmatched constructor, generate a new factory method and generate a new rule that invokes that method.
 
   putStrLn "original rules (with types subst'ed)"
-  forM_ (rules skin') print
+  forM_ (rules matchedSkin) print
   putStrLn "<< original rules (with types subst'ed)"
 
   -- Unlike when matching, include the constructors in the subtype hierarchy when generating new rules.
-  let hierarchy2 = makeHierarchy (jinterfaces jast) (jconstructors jast)
-  -- let hierarchy2 = M.insert "Method" (TCon "Declaration" []) hierarchy
-  let skin'' = execState (makeNewRules matchResults hierarchy2) skin'
+  let hierarchyWithConstructors = makeHierarchy (jinterfaces typedJast) (jconstructors typedJast)
+  -- let hierarchyWithConstructors = M.insert "Method" (TCon "Declaration" []) hierarchy
+  let skinWithNewRules = execState (makeNewRules matchResults hierarchyWithConstructors) matchedSkin
 
   putStrLn "new rules"
-  forM_ (rules skin'') print
+  forM_ (rules skinWithNewRules) print
   putStrLn "<< new rules"
 
   -- Need to prune the grammar.
   -- Starting at root symbol ("goal")
   -- eliminate rhs symbols that aren't covered by the factory calls
 
-  let skin''' = skin'' { rules = removeUnreachableRules (rules skin'') }
+  let finalSkin = skinWithNewRules { rules = removeUnreachableRules "goal" skinWithNewRules typedJast }
 
   putStrLn "removed unreachable rules"
-  forM_ (rules skin''') print
+  forM_ (rules finalSkin) print
   putStrLn "<< removed unreachable rules"
 
   return ()

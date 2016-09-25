@@ -1,4 +1,4 @@
-module Typer (typeCheckSkin, makeHierarchy) where
+module Typer (typeCheckSkin, typeCheckJAST, makeHierarchy) where
 
 import           Control.Monad.Identity
 import           Control.Monad.Reader
@@ -195,6 +195,7 @@ typeCheck (JVar x _) = do
 typeCheck e =
   error $ "missing case " ++ show e
 
+typeCheckRules :: [(String, Type)] -> [JConstructor] -> [Rule] -> [Template] -> TC ([Rule], [Template])
 typeCheckRules tokens factories rules templates = do
   bindings <- forM rules $ \(Rule t lhs rhs action) ->
     return (lhs, t)
@@ -240,6 +241,29 @@ makeHierarchy is fs = h
     -- h2 = h1
     h3 = M.insert "String" (TCon "Object" []) h2
     h = h3
+
+typeCheckCtor :: [JConstructor] -> JExp -> TC JExp
+typeCheckCtor ks e @ (JNew es (TCon label [])) =
+    local (\env -> foldl addParameters env ks) $ typeCheck e
+  where
+    addParameters env (JConstructor k args _) | k == label = addBindings args env
+    addParameters env _ = env
+typeCheckCtor ks e = typeCheck e
+
+typeCheckJAST :: JAST -> IO JAST
+typeCheckJAST jast = do
+  let subtypeHierarchy = makeHierarchy (jinterfaces jast) (jconstructors jast)
+
+  typeBindings <- forM (jconstructors jast) $ \(JConstructor label children super) ->
+    return (label, funType' (map snd children) super)
+
+  bindings <- forM (jenums jast) $ \(JEnum label t) ->
+    return (label, t)
+
+  let env = addBindings $ typeBindings ++ bindings
+  let jexps' = map (runTC subtypeHierarchy . local env . typeCheckCtor (jconstructors jast)) (jexps jast)
+
+  return $ jast { jexps = jexps' }
 
 typeCheckSkin :: Skin -> IO Skin
 typeCheckSkin skin = do
