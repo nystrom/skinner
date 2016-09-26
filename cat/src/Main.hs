@@ -289,6 +289,7 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
 matchConstructors e = return $ NoMatch e
 
 
+
 type SubtypeEnv = M.Map String Type
 
 supertype :: SubtypeEnv -> Type -> Maybe Type
@@ -369,7 +370,6 @@ matchTypes skin jast = do
   let substToVoid = map (\i -> (toType i, TCon "void" [])) (interfaces skin)
   return $ substSkin (mapping ++ substToVoid) skin
 
-
 substSkin :: TypeMapping -> Skin -> Skin
 substSkin s skin = skin { interfaces = substInterfaces s (interfaces skin),
                           factories = substCtors s (factories skin),
@@ -436,6 +436,7 @@ removeUnreachableRules start skin jast = filter (`elem` covered) (rules skin)
 
     findRulesFor lhs = filter (\(Rule _ x _ _) -> lhs == x)
 
+type RandomM a = State [Probability] a
 
 data MatchResult = Match Int JConstructor JExp
                  | NoMatch JExp
@@ -452,6 +453,10 @@ instance ConvertToType JInterface where
 
 instance ConvertToType JConstructor where
   toType (JConstructor label _ _) = TCon label []
+
+
+crossProduct :: [a] -> [b] -> [(a, b)]
+crossProduct = liftM2 (,)
 
 -- generate a random mapping, then improve using the Metropolis algorithm
 matchTypesMetropolis :: [Probability] -> Skin -> JAST -> TypeMapping
@@ -470,46 +475,16 @@ matchTypesMetropolis randoms skin jast = result
     jhierarchy = makeHierarchy (jinterfaces jast) (jconstructors jast)
 
     result :: TypeMapping
-    result = evalState findMapping randoms
-
-    nextRandom :: State [Probability] Probability
-    nextRandom = do
-      randoms <- get
-      put (tail randoms)
-      return (head randoms)
-
-    randomIndex :: Int -> State [Probability] Int
-    randomIndex n = do
-      j <- nextRandom
-      let k = round $ j * fromIntegral n
-      if k < 0 || k >= n
-        then randomIndex n
-        else return k
-
-    -- Not the best shuffling algorithm, but works for our purposes.
-    -- System.Random.Shuffle is obscure.
-    shuffle :: [a] -> State [Probability] [a]
-    shuffle xs = case xs of
-      [] -> return []
-      [x] -> return [x]
-      xs -> do
-        let n = length xs
-        j <- randomIndex n
-        as <- shuffle (drop j xs)
-        bs <- shuffle (take j xs)
-        return $ as ++ bs
-
-    crossProduct :: [a] -> [b] -> [(a, b)]
-    crossProduct = liftM2 (,)
+    result = runRandom randoms findMapping
 
     -- all possible mappings (including duplicates)
     universe :: TypeMapping
     universe = crossProduct is js
 
     -- generate a random mapping, but don't map an i to more than one j
-    initialMapping :: State [Probability] TypeMapping
+    initialMapping :: RandomM TypeMapping
     initialMapping = do
-      es <- filterM selectEdge universe
+      es <- filterM (const selectEdge) universe
       es' <- shuffle es
       return $ removeDups es
 
@@ -520,7 +495,7 @@ matchTypesMetropolis randoms skin jast = result
         go ((i,j):rest) acc =
               go rest ((i,j):filter (\(i',j') -> i /= i') acc)
 
-    findMapping :: State [Probability] TypeMapping
+    findMapping :: RandomM TypeMapping
     findMapping = do
       ijs <- initialMapping
       iterateMapping numIterations ijs
@@ -544,15 +519,15 @@ matchTypesMetropolis randoms skin jast = result
             then iterateMapping (iters-1) ijs'
             else iterateMapping (iters-1) ijs
 
-    selectEdge :: (Type, Type) -> State [Probability] Bool
-    selectEdge (i,j) = do
+    selectEdge :: RandomM Bool
+    selectEdge = do
       r <- nextRandom
       return $ r < edgeSelectionThreshold
 
-    cost :: [(Type, Type)] -> Int
+    cost :: TypeMapping -> Int
     cost edges = sum (map subtypeViolationCost (crossProduct edges edges) ++ map siblingViolationCost (crossProduct edges edges) ++ map arityViolationCost edges ++ map renamingCost edges) + missingCost edges is js
 
-    missingCost :: [(Type, Type)] -> [Type] -> [Type] -> Int
+    missingCost :: TypeMapping -> [Type] -> [Type] -> Int
     missingCost edges is js = length is - length edges
 
     subtypeViolationCost :: ((Type, Type), (Type, Type)) -> Int
@@ -572,7 +547,7 @@ matchTypesMetropolis randoms skin jast = result
     renamingCost (_, _) = 99999
 
     -- randomly delete some mappings
-    nextMapping :: TypeMapping -> State [Probability] TypeMapping
+    nextMapping :: TypeMapping -> RandomM TypeMapping
     nextMapping mapping = do
       r <- nextRandom
       firstPart <- if r < 0.7
@@ -589,7 +564,164 @@ matchTypesMetropolis randoms skin jast = result
                         return $ take 1 (drop k es)
                       else
                         return []
-      return $ firstPart ++ removeDups secondPart
+      r <- shuffle (firstPart ++ secondPart)
+      return $ removeDups r
+
+
+matchConstructors2 :: Skin -> JAST -> IO CMapping
+matchConstructors2 skin jast = do
+  let randomList seed = randoms (mkStdGen seed) :: [Probability]
+  seed <- randomIO
+
+  let mapping = matchConstructorsMetropolis (randomList seed) skin jast
+
+  return mapping
+
+runRandom :: [Probability] -> RandomM a -> a
+runRandom = flip evalState
+
+nextRandom :: RandomM Probability
+nextRandom = do
+  randoms <- get
+  put (tail randoms)
+  return (head randoms)
+
+randomIndex :: Int -> RandomM Int
+randomIndex n = do
+  j <- nextRandom
+  let k = round $ j * fromIntegral n
+  if k < 0 || k >= n
+    then randomIndex n
+    else return k
+
+-- Not the best shuffling algorithm, but works for our purposes.
+-- System.Random.Shuffle is obscure.
+shuffle :: [a] -> RandomM [a]
+shuffle xs = case xs of
+  [] -> return []
+  [x] -> return [x]
+  xs -> do
+    let n = length xs
+    j <- randomIndex n
+    as <- shuffle (drop j xs)
+    bs <- shuffle (take j xs)
+    return $ as ++ bs
+
+type CMapping = [(Rule, JExp)]
+
+-- Find the free variables of the expression.
+-- Find a factory method with matching arguments and matching name.
+matchConstructorsMetropolis :: [Probability] -> Skin -> JAST -> CMapping
+matchConstructorsMetropolis randoms skin jast = result
+  where
+    is :: [Type]
+    is = map toType (interfaces skin) ++ map toType (factories skin)
+
+    js :: [Type]
+    js = map toType (jinterfaces jast)  ++ map toType (jconstructors jast)
+
+    skinRules :: [Rule]
+    skinRules = rules skin
+
+    exps :: [JExp]
+    exps = jexps jast
+
+    ihierarchy :: M.Map String Type
+    ihierarchy = makeHierarchy (interfaces skin) (factories skin)
+
+    jhierarchy :: M.Map String Type
+    jhierarchy = makeHierarchy (jinterfaces jast) (jconstructors jast)
+
+    result :: CMapping
+    result = runRandom randoms findMapping
+
+    -- generate a random mapping, but don't map an i to more than one j
+    initialMapping :: State [Probability] CMapping
+    initialMapping = do
+      es <- filterM (const selectEdge) (crossProduct skinRules exps)
+      es' <- shuffle es
+      return $ removeDups es
+
+    removeDups :: CMapping -> CMapping
+    removeDups es = go es []
+      where
+        go [] acc = acc
+        go ((i,j):rest) acc =
+              go rest ((i,j):filter (\(i',j') -> i /= i') acc)
+
+    findMapping :: State [Probability] CMapping
+    findMapping = do
+      ijs <- initialMapping
+      iterateMapping numIterations ijs
+
+    -- Metropolis algorithm parameters
+    beta = fromIntegral $ length is + length js
+    f ijs = exp $ fromIntegral (- beta * cost ijs)
+    alpha ijs ijs' = min 1 (f ijs' / f ijs)
+    edgeSelectionThreshold = min 0.7 (fromIntegral (length js) / fromIntegral (length is))
+    numIterations = 30 * (length is + length js)
+
+    iterateMapping :: Int -> CMapping -> RandomM CMapping
+    iterateMapping iters ijs =
+      if iters == 0
+        then
+          return ijs
+        else do
+          ijs' <- nextMapping ijs
+          r <- nextRandom
+          if r < alpha ijs ijs'
+            then iterateMapping (iters-1) ijs'
+            else iterateMapping (iters-1) ijs
+
+    selectEdge :: RandomM Bool
+    selectEdge = do
+      r <- nextRandom
+      return $ r < edgeSelectionThreshold
+
+    cost :: CMapping -> Int
+    cost edges = 0
+
+    missingCost :: CMapping -> Int
+    missingCost edges = length exps - length edges
+
+    subtypeViolationCost :: ((Rule, JExp), (Rule, JExp)) -> Int
+    subtypeViolationCost ((Rule t _ _ _, e), (Rule t' _ _ _, e')) =
+      length $ filter id [isSubtype ihierarchy t t' /= isSubtype jhierarchy (typeof e) (typeof e'),
+                          isSubtype ihierarchy t' t /= isSubtype jhierarchy (typeof e') (typeof e)]
+
+    siblingViolationCost :: ((Rule, JExp), (Rule, JExp)) -> Int
+    siblingViolationCost ((Rule t x _ _, e), (Rule t' x' _ _, e')) =
+      if x == x'
+        then if (typeof e) == (typeof e')
+          then 0
+          else 1
+        else if (typeof e) == (typeof e')
+          then 1
+          else 0
+
+    renamingCost :: (Rule, JExp) -> Int
+    renamingCost (Rule t lhs rhs _, e) = 0
+
+    -- randomly delete some mappings
+    nextMapping :: CMapping -> RandomM CMapping
+    nextMapping mapping = do
+      r <- nextRandom
+      firstPart <- if r < 0.7071
+                    then do
+                      k <- randomIndex (length mapping)
+                      return $ take k mapping ++ drop (k+1) mapping
+                    else
+                      return mapping
+      r <- nextRandom
+      secondPart <- if r < 0.7071
+                      then do
+                        es <- initialMapping
+                        k <- randomIndex (length es)
+                        return $ take 1 (drop k es)
+                      else
+                        return []
+      r <- shuffle (firstPart ++ secondPart)
+      return $ removeDups r
 
 -- find all the covered rules
 findCoveredRules :: Skin -> [JConstructor] -> [Rule]
@@ -754,6 +886,7 @@ main = do
 
   run skinFile astFile
 
+-- factor out the core of main so we can call it from the repl more easily
 run :: String -> String -> IO ()
 run skinFile astFile = do
 
@@ -815,10 +948,10 @@ run skinFile astFile = do
   -- Starting at root symbol ("goal")
   -- eliminate rhs symbols that aren't covered by the factory calls
 
-  let finalSkin = skinWithNewRules { rules = removeUnreachableRules "goal" skinWithNewRules typedJast }
-
-  putStrLn "removed unreachable rules"
-  forM_ (rules finalSkin) print
-  putStrLn "<< removed unreachable rules"
+  -- let finalSkin = skinWithNewRules { rules = removeUnreachableRules "goal" skinWithNewRules typedJast }
+  --
+  -- putStrLn "removed unreachable rules"
+  -- forM_ (rules finalSkin) print
+  -- putStrLn "<< removed unreachable rules"
 
   return ()
