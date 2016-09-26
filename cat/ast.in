@@ -5,10 +5,33 @@ abstract class Declaration extends Object
 class Method(String id, String[] params, Expression body) extends Declaration
 
 abstract class Expression extends Object
-class BinExp(BinaryOp op, Expression left, Expression right) extends Expression
-class AssocExp(AssocOp op, Expression[] es) extends Expression
 class Value(int value) extends Expression
-class If(Expression cond, Expression then, Expression else) extends Expression
 class Var(String name) extends Expression
-enum BinaryOp = Minus | Divide | Remainder
-enum AssocOp = Plus | Times
+
+class If(Expression cond, Expression then, Expression else) extends Expression
+
+class BinExp(BinaryOp op, Expression left, Expression right) extends Expression
+enum BinaryOp { Minus, Divide, Remainder }
+
+class AssocExp(AssocOp op, Expression[] es) extends Expression
+enum AssocOp { Plus, Times }
+
+
+new Program(decls)
+new Method(id, params, body)
+new BinExp(Minus, left, right)
+new BinExp(Divide, left, right)
+new BinExp(Remainder, left, right)
+new AssocExp(Plus, es)
+new AssocExp(Times, es)
+new Value(value)
+new If(cond, then, else)
+new Var(name)
+
+%header
+
+%body
+
+Position position(String file, int line, int column, int offset) {
+  return new Position(file, line, column, offset);
+}
