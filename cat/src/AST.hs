@@ -73,6 +73,16 @@ data Tyvar = Tyvar String
 data Rule = Rule Type String [(Sym, String)] JExp
   deriving (Show, Eq)
 
+ruleIsEssential :: Rule -> Bool
+ruleIsEssential (Rule _ _ _ e) = callsFactory e
+  where
+    callsFactory (JNew _ _) = True
+    callsFactory (JOp _ es _) = any callsFactory es
+    callsFactory (JK "Nil" _) = False
+    callsFactory (JK "Nothing" _) = False
+    callsFactory (JK _ _) = True
+    callsFactory (JVar _ _) = False
+
 data Template = Template Type Type [(Sym, String)] JExp
   deriving (Show, Eq)
 

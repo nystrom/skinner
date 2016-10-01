@@ -6,9 +6,9 @@ import           Control.Monad.State
 
 import           Data.Char            (isLower, isUpper, toLower, toUpper)
 import           Data.List            (find, intercalate, minimum, minimumBy,
-                                       nub, sortBy, sortOn, (\\), permutations)
+                                       nub, sortBy, sortOn, (\\), intersect)
 import qualified Data.Map             as M
-import           Data.Maybe           (catMaybes, fromMaybe, listToMaybe)
+import           Data.Maybe           (catMaybes, fromMaybe, mapMaybe, listToMaybe, isNothing)
 import           Data.Monoid
 import           Data.Tuple           (swap)
 
@@ -26,6 +26,8 @@ import           JASTParse
 import           SkinParse
 import           Typer
 
+type Cost = Double
+
 -- printf debugging
 debug :: (Monad m) => String -> m ()
 debug s = trace s (return ())
@@ -35,9 +37,6 @@ freeVars (JNew es t)   = nub $ concatMap freeVars es
 freeVars (JOp op es t) = nub $ concatMap freeVars es
 freeVars (JK k t)      = []
 freeVars (JVar x t)    = [(x, t)]
-
-class Wordy a where
-  toBagOfWords :: a -> [String]
 
 instance Wordy JExp where
   toBagOfWords (JNew es t)   = toBagOfWords t ++ concatMap toBagOfWords es
@@ -215,6 +214,66 @@ substVars s (JOp k es t) = JOp k (map (substVars s) es) t
 substVars s (JK k t)     = JK k t
 substVars s (JVar x t)   = fromMaybe (JVar x t) (lookup x s)
 
+match1Constructor :: JExp -> JConstructor -> Reader SubtypeEnv MatchResult
+match1Constructor (new @ (JNew args typ @ (TCon label []))) (k @ (JConstructor skinLabel skinFields skinSuper)) = do
+    let fv = freeVars new
+
+    hierarchy <- ask
+
+    -- make a substitution that coerces the factory method parameters (skinFields) to the right type for the
+    -- free variables (fv) of the constructor call.
+
+    theta <- do -- trace ("matching " ++ show skinFields ++ " in " ++ show k ++ " with " ++ show fv) $ do
+      case (skinFields, fv) of
+        -- HACK: if there are more parameter to the factory method than there are free variables in
+        -- the constructor call, try to group the parameters into a list or array.
+        -- For now, just handle two parameters. This handles the case of binary operators
+        -- that are implemented using lists of operands in the Java AST.
+        ([(y1, t1'), (y2, t2')], [(x, TCon "List" [t])]) | t1' == t2' ->
+          case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) (TCon "List" [t]) of
+            Just e  -> return [(x, e)]
+            Nothing -> return []
+        ([(y1, t1'), (y2, t2')], [(x, TCon "Array" [t])]) | t1' == t2' ->
+          case coerce hierarchy (JOp "toArray2" [JVar y1 t1', JVar y2 t1'] (TCon "Array" [t1'])) (TCon "Array" [t]) of
+            Just e  -> return [(x, e)]
+            Nothing -> return []
+        ([(y1, t1'), (y2, t2')], [(x, t)]) | t1' == t2' ->
+          case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) t of
+            Just e  -> return [(x, e)]
+            Nothing -> return []
+
+        (skinFields, fv) | length skinFields == length fv -> do
+
+          -- We have a call to a constructor in the Java AST.
+          -- We want to see if we can invoke that constructor from the given factory method in the Skin.
+
+          -- To do this, we see if we can coerce each of the parameters of the factory method
+          -- into an argument of the constructor call.
+
+          -- We need to cover all arguments to the constructor call (i.e., those that are free variables of the `new` JExp).
+
+          -- We just assume the free variables and factory parameters are in the same order. This could be relaxed when the types are different.
+          -- In particular, we might have a separate enum parameter that (e.g., PLUS on a BinaryExpression node) that could go anywhere in the parameter list.
+
+          -- TOOD: we need to handle extra arguments like a Position.
+
+          otheta <- forM (zip fv skinFields) $ \((x, t), (y, t')) -> -- trace ("coerce " ++ show (y, t') ++ " to " ++ show t) $
+            case coerce hierarchy (JVar y t') t of
+              Just e  -> return $ Just (x, e)
+              Nothing -> return Nothing
+
+          let theta = catMaybes otheta
+
+          return theta
+        _ ->
+          return []
+
+    if length theta == length fv
+      then do
+        return $ Match 0 k (substVars theta new)
+      else
+        return $ NoMatch new
+
 -- Find the free variables of the expression.
 -- Find a factory method with matching arguments and matching name.
 matchConstructors :: JExp -> Reader (Skin, SubtypeEnv) MatchResult
@@ -347,7 +406,7 @@ generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
         addEnum2 (JEnum enum (TCon esuper [])) (JVar x (TCon label [])) | esuper == label = JK enum (TCon label [])
         addEnum2 _ ex = ex
 
-matchName :: Skin -> String -> String -> Int
+matchName :: Skin -> String -> String -> Double
 matchName skin = matchNameWithAliases (aliases skin)
 
 -- match types skinhe JAST, rewriting the skin
@@ -360,15 +419,16 @@ matchName skin = matchNameWithAliases (aliases skin)
 matchTypes :: Skin -> JAST -> IO Skin
 matchTypes skin jast = do
   let randomList seed = randoms (mkStdGen seed) :: [Probability]
-  seed <- randomIO
+  seed <- randomIO :: IO Int
+  let rands = randomList seed
 
   putStrLn "new type matcher"
-  let mapping = matchTypesMetropolis (randomList seed) skin jast
+  let mapping = matchInterfaces {- rands -} skin jast
   print mapping
   putStrLn "<< new type matcher"
 
-  let substToVoid = map (\i -> (toType i, TCon "void" [])) (interfaces skin)
-  return $ substSkin (mapping ++ substToVoid) skin
+  let substToVoid = map (\i -> (toTypeVar i, TCon "void" [])) (interfaces skin)
+  return $ substSkin (map (\(Tyvar i, t) -> (TCon i [], t)) (mapping ++ substToVoid)) skin
 
 substSkin :: TypeMapping -> Skin -> Skin
 substSkin s skin = skin { interfaces = substInterfaces s (interfaces skin),
@@ -438,7 +498,7 @@ removeUnreachableRules start skin jast = filter (`elem` covered) (rules skin)
 
 type RandomM a = State [Probability] a
 
-data MatchResult = Match Int JConstructor JExp
+data MatchResult = Match Cost JConstructor JExp
                  | NoMatch JExp
   deriving Show
 
@@ -454,119 +514,100 @@ instance ConvertToType JInterface where
 instance ConvertToType JConstructor where
   toType (JConstructor label _ _) = TCon label []
 
+toTypeVar (JInterface label _) = Tyvar label
 
 crossProduct :: [a] -> [b] -> [(a, b)]
 crossProduct = liftM2 (,)
 
--- generate a random mapping, then improve using the Metropolis algorithm
-matchTypesMetropolis :: [Probability] -> Skin -> JAST -> TypeMapping
-matchTypesMetropolis randoms skin jast = result
+pick :: Show a => [[a]] -> [[a]]
+-- pick ts | trace (show ts) False = undefined
+pick [] = []
+pick [ys] = map return ys
+pick ([]:ys) = pick ys
+pick ((x:xs):ys) = map (\s -> x:s) (pick ys) ++ pick (xs:ys)
+
+-- match types (not classes)
+--   use subtypes as weights...
+--   should end up mapping stm AND exp to exp
+matchInterfaces :: Skin -> JAST -> Subst
+matchInterfaces skin jast = result
   where
-    is :: [Type]
-    is = map toType (interfaces skin) ++ map toType (factories skin)
+    is :: [Tyvar]
+    is = map toTypeVar (interfaces skin)
 
     js :: [Type]
-    js = map toType (jinterfaces jast)  ++ map toType (jconstructors jast)
+    js = map toType (jinterfaces jast)
 
-    ihierarchy :: M.Map String Type
+    ihierarchy :: SubtypeEnv
     ihierarchy = makeHierarchy (interfaces skin) (factories skin)
 
-    jhierarchy :: M.Map String Type
+    jhierarchy :: SubtypeEnv
     jhierarchy = makeHierarchy (jinterfaces jast) (jconstructors jast)
 
-    result :: TypeMapping
-    result = runRandom randoms findMapping
-
-    -- all possible mappings (including duplicates)
-    universe :: TypeMapping
-    universe = crossProduct is js
-
-    -- generate a random mapping, but don't map an i to more than one j
-    initialMapping :: RandomM TypeMapping
-    initialMapping = do
-      es <- filterM (const selectEdge) universe
-      es' <- shuffle es
-      return $ removeDups es
-
-    removeDups :: TypeMapping -> TypeMapping
-    removeDups es = go es []
+    result :: Subst
+    result = s1 ++ s2
       where
-        go [] acc = acc
-        go ((i,j):rest) acc =
-              go rest ((i,j):filter (\(i',j') -> i /= i') acc)
+        s1 = findSubst
+        missing = filter (not . (`elem` map fst s1)) is
+        s2 = mapMaybe (findPrimitiveMatch s1) missing
 
-    findMapping :: RandomM TypeMapping
-    findMapping = do
-      ijs <- initialMapping
-      iterateMapping numIterations ijs
+    -- If there is just one factory for the given type and one field, match that type.
+    -- If there are no factories, match with void.
+    -- Otherwise, no match!
+    findPrimitiveMatch :: Subst -> Tyvar -> Maybe (Tyvar, Type)
+    -- findPrimitiveMatch (Tyvar "IDENTIFIER") = Just (Tyvar "IDENTIFIER", TCon "String" [])
+    findPrimitiveMatch subst (Tyvar i) = do
+      let ifact = filter (\(JConstructor k args (TCon super _)) -> super == i) (factories skin)
+      case ifact of
+        [] -> Just (Tyvar i, TCon "void" [])
+        [JConstructor k [(x, TCon t [])] _] -> case lookup (Tyvar t) subst of
+          Just t' -> Just (Tyvar i, t')
+          Nothing -> Nothing
+        [JConstructor k [(x, TCon "List" [TCon t []])] _] -> case lookup (Tyvar t) subst of
+          Just t' -> Just (Tyvar i, TCon "List" [t'])
+          Nothing -> Nothing
+        [JConstructor k [(x, TCon "Maybe" [TCon t []])] _] -> case lookup (Tyvar t) subst of
+          Just t' -> Just (Tyvar i, TCon "Maybe" [t'])
+          Nothing -> Nothing
+        _ -> Nothing
 
-    -- Metropolis algorithm parameters
-    beta = fromIntegral $ length is + length js
-    f ijs = exp $ fromIntegral (- beta * cost ijs)
-    alpha ijs ijs' = min 1 (f ijs' / f ijs)
-    edgeSelectionThreshold = min 0.7 (fromIntegral (length js) / fromIntegral (length is))
-    numIterations = 30 * (length is + length js)
+    findSubst = case allSubsts of
+      [] -> error "no subst possible!"
+      allSubsts -> minimumBy (\s1 s2 -> cost s1 `compare` cost s2) allSubsts
 
-    iterateMapping :: Int -> TypeMapping -> State [Probability] TypeMapping
-    iterateMapping iters ijs =
-      if iters == 0
-        then
-          return ijs
-        else do
-          ijs' <- nextMapping ijs
-          r <- nextRandom
-          if r < alpha ijs ijs'
-            then iterateMapping (iters-1) ijs'
-            else iterateMapping (iters-1) ijs
+    allSubsts :: [Subst]
+    allSubsts = do
+      let mappings :: [[(Cost, Tyvar, Type)]]
+          mappings = map (filter (\(cost, _, _) -> cost < 0.25) . selectSkinType . toType) (jinterfaces jast)
+      generateSubsts mappings
 
-    selectEdge :: RandomM Bool
-    selectEdge = do
-      r <- nextRandom
-      return $ r < edgeSelectionThreshold
+    generateSubsts :: [[(Cost, Tyvar, Type)]] -> [Subst]
+    generateSubsts ys = pick $ map (map (\(cost, i, j) -> (i, j))) ys
 
-    cost :: TypeMapping -> Int
-    cost edges = sum (map subtypeViolationCost (crossProduct edges edges) ++ map siblingViolationCost (crossProduct edges edges) ++ map arityViolationCost edges ++ map renamingCost edges) + missingCost edges is js
+    cost :: Subst -> Cost
+    cost = sum . map (uncurry computeCost)
 
-    missingCost :: TypeMapping -> [Type] -> [Type] -> Int
-    missingCost edges is js = length is - length edges
+    selectSkinType :: Type -> [(Cost, Tyvar, Type)]
+    selectSkinType jt =
+      map (\(cost, i) -> (cost, i, jt)) (compareSkinTypes jt)
 
-    subtypeViolationCost :: ((Type, Type), (Type, Type)) -> Int
-    subtypeViolationCost ((i,j), (i',j')) = length $ filter id [isSubtype ihierarchy i i' /= isSubtype jhierarchy j j',
-                                                                isSubtype ihierarchy i' i /= isSubtype jhierarchy j' j]
+    compareSkinTypes :: Type -> [(Cost, Tyvar)]
+    compareSkinTypes jt = do
+      let matches = map ((\i -> (computeCost i jt, i)) . toTypeVar) (interfaces skin)
+      sortBy (\(cost, i) (cost', i') -> cost `compare` cost') matches
 
-    siblingViolationCost :: ((Type, Type), (Type, Type)) -> Int
-    siblingViolationCost ((i,j), (i',j')) = if (supertype ihierarchy i == supertype ihierarchy i') /= (supertype jhierarchy j == supertype jhierarchy j')
-                                              then 1
-                                              else 0
+    isubclasses i = map fst $ filter (\(sub, TCon sup []) -> sup == i) $ M.toList ihierarchy
+    jsubclasses j = map fst $ filter (\(sub, TCon sup []) -> sup == j) $ M.toList jhierarchy
 
-    arityViolationCost :: (Type, Type) -> Int
-    arityViolationCost (i, j) = 0
-
-    renamingCost :: (Type, Type) -> Int
-    renamingCost (TCon i [], TCon j []) = if i == j then 0 else matchName skin i j + matchName skin j i
-    renamingCost (_, _) = 99999
-
-    -- randomly delete some mappings
-    nextMapping :: TypeMapping -> RandomM TypeMapping
-    nextMapping mapping = do
-      r <- nextRandom
-      firstPart <- if r < 0.7
-                    then do
-                      k <- randomIndex (length mapping)
-                      return $ take k mapping ++ drop (k+1) mapping
-                    else
-                      return mapping
-      r <- nextRandom
-      secondPart <- if r < 0.7
-                      then do
-                        es <- initialMapping
-                        k <- randomIndex (length es)
-                        return $ take 1 (drop k es)
-                      else
-                        return []
-      r <- shuffle (firstPart ++ secondPart)
-      return $ removeDups r
-
+    -- The cost is the renaming cost + some function of the subclasses of the two types
+    computeCost :: Tyvar -> Type -> Cost
+    computeCost (Tyvar i) (TCon j [])  = do
+      let renamingCost = matchName skin i j
+      -- count the number of subclasses of i that match with subclasses of j
+      let ijs = liftM2 (,) (isubclasses i) (jsubclasses j)
+      let ijcosts = map (uncurry (matchName skin)) ijs
+      let ijcount = length (filter (< 0.01) ijcosts)
+      renamingCost * if null ijcosts then 1 else 1 - fromIntegral ijcount / fromIntegral (length ijcosts)
 
 matchConstructors2 :: Skin -> JAST -> IO CMapping
 matchConstructors2 skin jast = do
@@ -607,18 +648,57 @@ shuffle xs = case xs of
     bs <- shuffle (take j xs)
     return $ as ++ bs
 
-type CMapping = [(Rule, JExp)]
+
+-- Copied from Typer!
+-- FIXME
+
+-- Mapping from type variables to types
+type Subst = [(Tyvar, Type)]
+
+(@@) :: Subst -> Subst -> Subst
+s1 @@ s2 = s5
+  where
+    s3 = [(u, substTy s1 t) | (u,t) <- s2, isNothing (lookup u s1)]
+    s4 = do
+      u <- map fst s1 `intersect` map fst s2
+      case lookup u s2 of
+        Just (TVar v) -> return (v, substTy s1 (TVar u))
+        Just t        -> return (u, substTy s1 t)
+    s5 = s3 ++ s4 ++ s1
+
+merge s1 s2 = s1 @@ s2
+
+mgu :: Type -> Type -> Maybe Subst
+mgu (TVar a) (TVar b) | a == b = Just []
+mgu (TVar a) (TVar b) | a < b  = Just [(a,TVar b)]
+mgu (TVar a) (TVar b) | b < a  = Just [(b,TVar a)]
+mgu (TVar a) t                 = Just [(a,t)]
+mgu t (TVar a)                 = Just [(a,t)]
+mgu (TCon a as) (TCon b bs) | a == b && length as == length bs = foldl merge [] <$> zipWithM mgu as bs
+mgu _ _ = Nothing
+
+-- Apply a substitution to a type.
+substTy :: Subst -> Type -> Type
+substTy s t @ (TVar x)    = fromMaybe t (lookup x s)
+substTy s (TCon label ts) = TCon label (map (substTy s) ts)
+substTy s TBoh            = TBoh
+
+data CMapping = CMapping [(Rule, JExp)] Subst
+  deriving (Eq, Show)
 
 -- Find the free variables of the expression.
 -- Find a factory method with matching arguments and matching name.
 matchConstructorsMetropolis :: [Probability] -> Skin -> JAST -> CMapping
 matchConstructorsMetropolis randoms skin jast = result
   where
-    is :: [Type]
-    is = map toType (interfaces skin) ++ map toType (factories skin)
+    is :: [Tyvar]
+    is = map toTypeVar (interfaces skin) -- ++ map toType (factories skin)
 
     js :: [Type]
-    js = map toType (jinterfaces jast)  ++ map toType (jconstructors jast)
+    js = map toType (jinterfaces jast) -- ++ map toType (jconstructors jast)
+
+    toTypeVar :: JInterface -> Tyvar
+    toTypeVar (JInterface label super) = Tyvar label
 
     skinRules :: [Rule]
     skinRules = rules skin
@@ -635,31 +715,65 @@ matchConstructorsMetropolis randoms skin jast = result
     result :: CMapping
     result = runRandom randoms findMapping
 
+    -- We treat the Skin interface types as type variables.
+    -- We map each Skin interface type to a Java type.
+    -- We use unification to check for inconsistencies in the types when generating rule mappings.
+
     -- generate a random mapping, but don't map an i to more than one j
-    initialMapping :: State [Probability] CMapping
+    initialMapping :: RandomM CMapping
     initialMapping = do
-      es <- filterM (const selectEdge) (crossProduct skinRules exps)
+      ts <- initialSubst
+      rs <- initialRuleMapping ts
+      return (CMapping rs ts)
+
+    -- Generate a random substitution.
+    initialSubst :: RandomM Subst
+    initialSubst = do
+      js' <- shuffle js
+      let es = zip is js'
+      return es
+
+    tweakSubst :: Subst -> RandomM Subst
+    tweakSubst s = do
+      i <- randomIndex (length s)
+      let (a, t) = s !! i
+      j <- randomIndex (length js)
+      let t' = js !! j
+      return $ take i s ++ (a, t') : drop (i+1) s
+
+    initialRuleMapping :: Subst -> RandomM [(Rule, JExp)]
+    initialRuleMapping s = do
+      let xs = crossProduct skinRules exps
+      let xs' = filter mguable xs
+      es <- filterM (const selectEdge) xs'
       es' <- shuffle es
       return $ removeDups es
 
-    removeDups :: CMapping -> CMapping
+    mguable :: (Rule, JExp) -> Bool
+    mguable (Rule (TCon label []) _ _ _, e) =
+      case mgu (TVar (Tyvar label)) (typeof e) of
+        Just s' -> True
+        Nothing -> False
+    mguable (Rule _ _ _ _, _) = False
+
+    removeDups :: Eq a => [(a,b)] -> [(a,b)]
     removeDups es = go es []
       where
         go [] acc = acc
         go ((i,j):rest) acc =
               go rest ((i,j):filter (\(i',j') -> i /= i') acc)
 
-    findMapping :: State [Probability] CMapping
+    findMapping :: RandomM CMapping
     findMapping = do
       ijs <- initialMapping
       iterateMapping numIterations ijs
 
     -- Metropolis algorithm parameters
     beta = fromIntegral $ length is + length js
-    f ijs = exp $ fromIntegral (- beta * cost ijs)
+    f ijs = exp (- beta * cost ijs)
     alpha ijs ijs' = min 1 (f ijs' / f ijs)
     edgeSelectionThreshold = min 0.7 (fromIntegral (length js) / fromIntegral (length is))
-    numIterations = 30 * (length is + length js)
+    numIterations = 30 * (length is + length js) + 50 * (length (rules skin) + length exps)
 
     iterateMapping :: Int -> CMapping -> RandomM CMapping
     iterateMapping iters ijs =
@@ -678,50 +792,90 @@ matchConstructorsMetropolis randoms skin jast = result
       r <- nextRandom
       return $ r < edgeSelectionThreshold
 
-    cost :: CMapping -> Int
-    cost edges = 0
+    cost :: CMapping -> Cost
+    cost (CMapping ruleMapping subst) = typeCost subst +
+                 sum (map (rhsCost' subst) ruleMapping) +
+                 sum (map renamingCost' ruleMapping) +
+                 10 * missingCost' ruleMapping
 
-    missingCost :: CMapping -> Int
-    missingCost edges = length exps - length edges
+    typeCost :: Subst -> Cost
+    typeCost subst =        sum (map renamingCost subst) +
+                           10 * missingCost subst
 
-    subtypeViolationCost :: ((Rule, JExp), (Rule, JExp)) -> Int
-    subtypeViolationCost ((Rule t _ _ _, e), (Rule t' _ _ _, e')) =
-      length $ filter id [isSubtype ihierarchy t t' /= isSubtype jhierarchy (typeof e) (typeof e'),
+    missingCost :: Subst -> Cost
+    missingCost s = fromIntegral $ length is - length s
+
+    renamingCost :: (Tyvar, Type) -> Cost
+    renamingCost (Tyvar i, TCon j []) = if i == j then 0 else matchName skin i j + matchName skin j i
+    renamingCost (_, _) = 99999
+
+    missingCost' :: [(Rule, JExp)] -> Cost
+    missingCost' edges = fromIntegral $ length exps - length edges
+
+    subtypeViolationCost' :: TypeMapping -> ((Rule, JExp), (Rule, JExp)) -> Cost
+    subtypeViolationCost' tm ((Rule t _ _ _, e), (Rule t' _ _ _, e')) =
+      fromIntegral $ length $ filter id [isSubtype ihierarchy t t' /= isSubtype jhierarchy (typeof e) (typeof e'),
                           isSubtype ihierarchy t' t /= isSubtype jhierarchy (typeof e') (typeof e)]
 
-    siblingViolationCost :: ((Rule, JExp), (Rule, JExp)) -> Int
-    siblingViolationCost ((Rule t x _ _, e), (Rule t' x' _ _, e')) =
-      if x == x'
-        then if (typeof e) == (typeof e')
-          then 0
-          else 1
-        else if (typeof e) == (typeof e')
-          then 1
-          else 0
+    siblingViolationCost' :: TypeMapping -> ((Rule, JExp), (Rule, JExp)) -> Cost
+    siblingViolationCost' tm ((Rule t lhs _ _, e), (Rule t' lhs' _ _, e'))
+      | lhs == lhs' && (typeof e) /= (typeof e') = 1
+      | lhs /= lhs' && (typeof e) == (typeof e') = 1
+      | otherwise = 0
 
-    renamingCost :: (Rule, JExp) -> Int
-    renamingCost (Rule t lhs rhs _, e) = 0
+    ruleEnv = map (\(Rule t lhs _ _) -> (lhs, t)) (rules skin)
 
-    -- randomly delete some mappings
+    rhsCost' :: Subst -> (Rule, JExp) -> Cost
+    rhsCost' s (Rule (TCon v []) lhs rhs k, e) = do
+      let t = substTy s (TVar (Tyvar v))
+      case coerce jhierarchy e t of
+        Just e' -> do
+          let fields :: [(Sym, String)] -> [(String, Type)]
+              fields [] = []
+              fields ((Terminal x, y):rhs) = fields rhs
+              fields ((Nonterminal x, y):rhs) = case lookup x ruleEnv of
+                Just t -> (y, t):fields rhs
+                Nothing -> fields rhs
+          case runReader (match1Constructor e (JConstructor lhs (fields rhs) t)) jhierarchy of
+            Match _ _ _ -> 0
+            NoMatch _ -> 99
+        Nothing -> 99
+
+    renamingCost' :: (Rule, JExp) -> Double
+    renamingCost' (Rule t lhs rhs e, JNew es newt) =
+      sum (map (matchName skin lhs) (toBagOfWords newt)) +
+      sum (map (\(x,y) -> matchName skin x y) (liftM2 (,) (toBagOfWords newt) (toBagOfWords e)))
+    renamingCost' (Rule t lhs rhs _, _) = 9999
+
+    -- randomly delete some mappings and add others.
     nextMapping :: CMapping -> RandomM CMapping
-    nextMapping mapping = do
+    nextMapping (CMapping ruleMapping subst) = do
       r <- nextRandom
+      -- 20.7% we insert a mapping only
+      -- 20.7% we remove a mapping only
+      -- 50% we do both
+      -- 8.6% we do neither
+      ts <- if r < 0.25
+                    then do
+                      tweakSubst subst
+                    else
+                      return subst
       firstPart <- if r < 0.7071
                     then do
-                      k <- randomIndex (length mapping)
-                      return $ take k mapping ++ drop (k+1) mapping
+                      k <- randomIndex (length ruleMapping)
+                      return $ take k ruleMapping ++ drop (k+1) ruleMapping
                     else
-                      return mapping
+                      return ruleMapping
       r <- nextRandom
       secondPart <- if r < 0.7071
                       then do
-                        es <- initialMapping
+                        es <- initialRuleMapping ts
                         k <- randomIndex (length es)
                         return $ take 1 (drop k es)
                       else
                         return []
-      r <- shuffle (firstPart ++ secondPart)
-      return $ removeDups r
+      rs <- shuffle (firstPart ++ secondPart)
+      return $ CMapping (removeDups rs) ts
 
 -- find all the covered rules
 findCoveredRules :: Skin -> [JConstructor] -> [Rule]
@@ -907,6 +1061,9 @@ run skinFile astFile = do
   matchedSkin <- matchTypes typedSkin typedJast
   debug $ "matchedSkin: " ++ show matchedSkin
 
+-- mapping <- matchConstructors2 typedSkin typedJast
+-- debug $ "mapping: " ++ show mapping
+
   -- Type-check again... This is just a sanity check that matchTypes didn't mess up the types
   typeCheckSkin matchedSkin
 
@@ -955,3 +1112,6 @@ run skinFile astFile = do
   -- putStrLn "<< removed unreachable rules"
 
   return ()
+
+loadAliases :: String -> IO [[String]]
+loadAliases file = aliases <$> parseAndCheck skin file

@@ -1,7 +1,7 @@
 -- This module handles matching names with aliases.
 -- For instance Plus and Add are aliases and so matching PlusExp with AddExp
 -- should cost nothing.
-module Aliases (Word, Aliases, matchNameWithAliases) where
+module Aliases (Word, Aliases, matchNameWithAliases, Wordy(..), breakNameIntoWords, expandAliases) where
 
 import Prelude hiding (Word)
 import Data.List ((\\), find, sortBy, minimum, minimumBy, nub)
@@ -10,21 +10,26 @@ import Data.Maybe (catMaybes, listToMaybe)
 import Debug.Trace (trace)
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Control.Monad (liftM2)
+
+class Wordy a where
+  toBagOfWords :: a -> [Word]
 
 type Word = String
 type Aliases = [Word]
 
 expandAliases :: [Aliases] -> Word -> [Word]
 expandAliases [] word = [word]
-expandAliases (aliases:aliasess) word = aliasesOf aliases word ++ expandAliases aliasess word
+expandAliases (aliases:aliasess) word = nub $ aliasesOf aliases word ++ expandAliases aliasess word
   where
     aliasesOf :: Aliases -> Word -> [Word]
     aliasesOf aliases word = if word `elem` aliases then aliases else []
 
+breakNameIntoWords :: String -> [String]
 -- Break a name like PlusExp or Plus_Exp into words: [Plus, Exp]
 breakNameIntoWords "" = []
 -- under_score
-breakNameIntoWords ('_':xs) = "" : breakNameIntoWords (dropWhile (=='_') xs)
+breakNameIntoWords ('_':xs) = "" : breakNameIntoWords (dropWhile (== '_') xs)
 -- two words
 breakNameIntoWords (x:xs) | isSpace x = "" : breakNameIntoWords (dropWhile isSpace xs)
 -- CamelCase
@@ -37,33 +42,27 @@ breakNameIntoWords (x:xs) = case words of
   where
     words = breakNameIntoWords xs
 
-matchNameWithAliases :: [[String]] -> String -> String -> Int
-matchNameWithAliases aliases x y =
-    {-
-    trace ("matchNameWithAliases " ++ x ++ " ~~ " ++ y ++ ": " ++ show r) $
-      trace ("  aliases for " ++ (show ys) ++ " ===> " ++ (show as)) r
-      -}
-    r
-  where
-    r = Set.size $ Set.fromList xs `Set.difference` Set.fromList as
-    xs = breakNameIntoWords (map toLower x)
-    ys = breakNameIntoWords (map toLower y)
-    as = nub $ concatMap (expandAliases aliases) ys
-    bs = nub $ concatMap (expandAliases aliases) xs
+matchWordies :: Wordy a => [[String]] -> a -> a -> Double
+matchWordies aliases x y = do
+  let xs = toBagOfWords x
+  let ys = toBagOfWords y
+  let xys = liftM2 (,) xs ys
+  product $ map (uncurry (matchNameWithAliases aliases)) xys
 
--- editDistanceString :: String -> String -> Int
--- editDistanceString = editDistance (const 1) (const (const 10))
---
--- editDistanceStrings = editDistance length editDistanceString
---
--- editDistance :: Eq a => (a -> Int) -> (a -> a -> Int) -> [a] -> [a] -> Int
--- editDistance cost cost2 [] [] = 0
--- editDistance cost cost2 (x:xs) [] = sum (map cost (x:xs))
--- editDistance cost cost2 [] (x:xs) = sum (map cost (x:xs))
--- editDistance cost cost2 (x:xs) (y:ys)
---   | x == y    = editDistance cost cost2 xs ys
---   | otherwise = minimum [
---       (cost x) + (editDistance cost cost2 xs (y:ys)),
---       (cost y) + (editDistance cost cost2 (x:xs) ys),
---       (cost2 x y) + (editDistance cost cost2 xs ys)
---     ]
+-- Compute a cost between 0 and 1 for a string match
+-- Exp -> Expression should cost 0
+-- Statement -> Exp should cost 0.5 (for example)
+-- Plus -> Times should cost 1
+matchNameWithAliases :: [[String]] -> String -> String -> Double
+matchNameWithAliases aliases x y =
+    product costs
+  where
+    xs = map (map toLower) $ breakNameIntoWords x
+    ys = map (map toLower) $ breakNameIntoWords y
+    xass = map (expandAliases aliases) xs
+    yass = map (expandAliases aliases) ys
+    xyass = liftM2 (,) xass yass
+    sd a b = (a `Set.difference` b) `Set.union` (b `Set.difference` a)
+    cost xas yas = size (Set.fromList xas `sd` Set.fromList yas) / size (Set.fromList xas `Set.union` Set.fromList yas)
+    size s = fromIntegral (Set.size s)
+    costs = map (uncurry cost) xyass

@@ -63,6 +63,21 @@ mgu h t1 t2 = go t1 t2
     go t1' t2' =
       error $ "cannot unify " ++ show t1' ++ " and " ++ show t2' ++ " on behalf of " ++ show t1 ++ " and " ++ show t2
 
+-- Unify, but allow the first type to be a subtype of the second.
+unifySubtype :: Type -> Type -> TC ()
+unifySubtype t1 t2 = do
+  rec <- get
+  h <- asks supers
+  let s = currSubst rec
+  let s' = mgu h t1 t2
+  put $ rec { currSubst = merge s' s }
+
+-- Apply a substitution to a type.
+substTy :: Subst -> Type -> Type
+substTy s t @ (TVar x)    = fromMaybe t (lookup x s)
+substTy s (TCon label ts) = TCon label (map (substTy s) ts)
+substTy s TBoh            = TBoh
+
 -- Type checking monad
 type TC = ConstraintsT (EnvT Identity)
 -- type TC = ReaderT Env (StateT TCRec Identity)
@@ -112,14 +127,6 @@ runTC subtypeHierarchy m = x
 emptySubst :: Subst
 emptySubst = []
 
--- Unify, but allow the first type to be a subtype of the second.
-unifySubtype :: Type -> Type -> TC ()
-unifySubtype t1 t2 = do
-  rec <- get
-  h <- asks supers
-  let s = currSubst rec
-  let s' = mgu h t1 t2
-  put $ rec { currSubst = merge s' s }
 
 subst :: Subst -> JExp -> JExp
 subst s (JNew es t) = do
@@ -238,7 +245,6 @@ makeHierarchy is fs = h
     h0 = M.empty
     h1 = foldl (\m (JInterface label super) -> M.insert label super m) h0 is
     h2 = foldl (\m (JConstructor label _ super) -> if super /= TCon label [] then M.insert label super m else m) h1 fs
-    -- h2 = h1
     h3 = M.insert "String" (TCon "Object" []) h2
     h = h3
 
@@ -271,8 +277,3 @@ typeCheckSkin skin = do
   let subtypeHierarchy = makeHierarchy (interfaces skin) [] -- (factories skin)
   let (rules', templates') = runTC subtypeHierarchy $ typeCheckRules (tokens skin) (factories skin) (rules skin) (templates skin)
   return skin { rules = rules', templates = templates' }
-
-substTy :: Subst -> Type -> Type
-substTy s t @ (TVar x)    = fromMaybe t (lookup x s)
-substTy s (TCon label ts) = TCon label (map (substTy s) ts)
-substTy s TBoh            = TBoh
