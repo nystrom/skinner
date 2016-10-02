@@ -5,17 +5,17 @@ import           Control.Monad.Reader
 import           Control.Monad.State
 
 import           Data.Char            (isLower, isUpper, toLower, toUpper)
-import           Data.List            (find, intercalate, minimum, minimumBy,
-                                       nub, sortBy, sortOn, (\\), intersect)
+import           Data.List            (find, intercalate, intersect, minimum,
+                                       minimumBy, nub, sortBy, sortOn, (\\))
 import qualified Data.Map             as M
-import           Data.Maybe           (catMaybes, fromMaybe, mapMaybe, listToMaybe, isNothing)
+import           Data.Maybe           (catMaybes, fromMaybe, isJust, isNothing,
+                                       listToMaybe, mapMaybe)
 import           Data.Monoid
 import           Data.Tuple           (swap)
 
 import           Debug.Trace          (trace)
 
 import           System.Environment   (getArgs)
-import           System.Random
 
 import           Text.Parsec          (parse)
 import           Text.Parsec.String
@@ -65,6 +65,25 @@ isPrimitive :: Type -> Bool
 isPrimitive (TCon "void" [])    = True
 isPrimitive (TCon "boolean" []) = True
 isPrimitive t                   = isPrimitiveNumber t
+
+isBuiltin :: Type -> Bool
+isBuiltin (TCon "Object" [])              = True
+isBuiltin (TCon "String" [])              = True
+isBuiltin (TCon "java.lang.Object" [])    = True
+isBuiltin (TCon "java.lang.String" [])    = True
+isBuiltin (TCon "java.lang.Byte" [])      = True
+isBuiltin (TCon "java.lang.Short" [])     = True
+isBuiltin (TCon "java.lang.Character" []) = True
+isBuiltin (TCon "java.lang.Integer" [])   = True
+isBuiltin (TCon "java.lang.Long" [])      = True
+isBuiltin (TCon "java.lang.Float" [])     = True
+isBuiltin (TCon "java.lang.Double" [])    = True
+isBuiltin (TCon "java.lang.Boolean" [])   = True
+isBuiltin (TCon "java.lang.Void" [])      = True
+isBuiltin (TCon "Array" [t])              = isBuiltin t
+isBuiltin (TCon "List" [t])               = isBuiltin t
+isBuiltin (TCon "java.util.List" [t])     = isBuiltin t
+isBuiltin t                               = isPrimitive t
 
 boxedType :: Type -> Maybe Type
 boxedType (TCon "byte" [])    = Just $ TCon "java.lang.Byte" []
@@ -419,58 +438,134 @@ matchName skin = matchNameWithAliases (aliases skin)
 matchTypes :: Skin -> JAST -> IO Skin
 matchTypes skin jast = do
   putStrLn "new type matcher"
-  let mapping = matchInterfaces skin jast
-  print mapping
+  let subst = matchInterfaces skin jast
+  print subst
   putStrLn "<< new type matcher"
 
-  let substToVoid = map (\i -> (toTypeVar i, TCon "void" [])) (interfaces skin)
-  return $ substSkin (map (\(Tyvar i, t) -> (TCon i [], t)) (mapping ++ substToVoid)) skin
+  -- let substToVoid = map (\i -> (toTypeVar i, TBoh)) (interfaces skin)
 
-substSkin :: TypeMapping -> Skin -> Skin
-substSkin s skin = skin { interfaces = substInterfaces s (interfaces skin),
-                          factories = substCtors s (factories skin),
-                          rules = substRules s (rules skin),
-                          tokens = substTokens s (tokens skin),
-                          templates = substTemplates s (templates skin) }
+  -- let skin' = removeUnmatchedRules subst skin
+  let skin' = substSkin subst skin
+
+  return skin'
+
+-- Is the skin type used for this particular substitution
+typeUsed :: Subst -> Type -> Bool
+typeUsed s t                  | isBuiltin t = True
+typeUsed s (TCon "List" [t])  = typeUsed s t
+typeUsed s (TCon "Maybe" [t]) = typeUsed s t
+typeUsed s (TCon label [])    = isJust (lookup (Tyvar label) s)
+typeUsed s t                  = False
+
+-- Is the skin type used for this substitution and does it map to a Java class.
+classUsed :: Subst -> Type -> Bool
+classUsed s (TCon "Object" []) = True
+classUsed s t                  | isBuiltin t = False
+classUsed s (TCon label [])    = case lookup (Tyvar label) s of
+                                   Just (TCon t []) -> True
+                                   _ -> False
+classUsed s t                  = False
+
+-- Apply the type substitution to the skin.
+substSkin :: Subst -> Skin -> Skin
+substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterface) (interfaces skin),
+                          factories = mapMaybe (fmap substFactory . fixFactory) (factories skin),
+                          rules = mapMaybe (fmap substRule . fixRule) (rules skin),
+                          tokens = mapMaybe (fmap substToken . fixToken) (tokens skin),
+                          templates = mapMaybe (fmap substTemplate . fixTemplate) (templates skin) }
   where
-    substTemplates s = map (substTemplate s)
-    substTemplate s (Template t1 t2 rhs e) = Template (substType s t1) (substType s t2) rhs (substExp s e)
+    fixToken :: (String, Type) -> Maybe (String, Type)
+    fixToken (x, t) | typeUsed s t = Just (x, t)
+    fixToken _      = Nothing
 
-    substTokens s = map (substToken s)
-    substToken s (x, t) = (x, substType s t)
+    fixInterface :: JInterface -> Maybe JInterface
+    fixInterface i | trace ("fixInterface " ++ show i) False = undefined
+    fixInterface (JInterface label t) = do
+      guard $ classUsed s (TCon label [])
+      guard $ classUsed s t
+      return $ JInterface label t
 
-    substInterfaces s = map (substInterface s)
-    substInterface s (JInterface label super) = JInterface (substLabel s label) (substType s super)
+    fixRule :: Rule -> Maybe Rule
+    fixRule (Rule t lhs rhs e) = do
+      rhs' <- fixRhs rhs
+      e' <- fixExp e
+      guard $ typeUsed s t
+      return $ Rule t lhs rhs' e'
 
-    substCtors s = map (substCtor s)
-    substCtor s (JConstructor label fields super) = JConstructor label (substFields s fields) (substType s super)
+    fixTemplate :: Template -> Maybe Template
+    fixTemplate (Template t1 t2 rhs e) = do
+      rhs' <- fixRhs rhs
+      e' <- fixExp e
+      guard $ typeUsed s t1
+      guard $ typeUsed s t2
+      return $ Template t1 t2 rhs' e'
 
-    substRules s = map (substRule s)
-    substRule s (Rule typ label rhs e) = Rule (substType s typ) label rhs (substExp s e)
+    fixExp :: JExp -> Maybe JExp
+    fixExp (JVar x t)   | typeUsed s t = Just $ JVar x t
+    fixExp (JNew es t)  = Just $ JNew (mapMaybe fixExp es) t
+    fixExp (JOp k es t) = Just $ JOp k (mapMaybe fixExp es) t
+    fixExp (JK k t)     | typeUsed s t = Just $ JK k t
+    fixExp e            = Nothing
 
-    substFields s = map (substField s)
-    substField s (x,t) = (x, substType s t)
+    fixRhs :: [(Sym, String)] -> Maybe [(Sym, String)]
+    fixRhs = mapM fixElement
 
-    substType s (TCon label ts) = TCon (substLabel s label) (map (substType s) ts)
-    substType s (TVar x) = TVar x
-    substType s TBoh = error $ "cannot type " ++ show TBoh
+    fixElement :: (Sym, String) -> Maybe (Sym, String)
+    fixElement (Terminal a, x)    | tokenUsed a       = Just (Terminal a, x)
+    fixElement (Nonterminal a, x) | nonterminalUsed a = Just (Nonterminal a, x)
+    fixElement _ = Nothing
 
-    substLabel [] label = label
-    substLabel ((TCon old _, TCon new _):rest) label
-      | label == old = new
-      | otherwise    = substLabel rest label
+    tokenUsed :: String -> Bool
+    tokenUsed a = case find ((== a) . fst) (tokens skin) of
+                    Just (x, t) -> typeUsed s t
+                    Nothing     -> False
 
-    substExp s e = do
-      let e' = substExp' s e
+    nonterminalUsed :: String -> Bool
+    nonterminalUsed a = case find (\(Rule t lhs _ _) -> lhs == a) (rules skin) of
+                          Just (Rule t _ _ _) -> typeUsed s t
+                          Nothing             -> False
+
+    fixFields :: [(String, Type)] -> [(String, Type)]
+    fixFields = filter (typeUsed s . snd)
+
+    fixFactory :: JConstructor -> Maybe JConstructor
+    fixFactory (JConstructor label fields t) = do
+      guard $ classUsed s t
+      return $ JConstructor label (fixFields fields) t
+
+    substTemplate (Template t1 t2 rhs e) = Template (substType t1) (substType t2) rhs (substExp e)
+
+    substToken (x, t) = (x, substType t)
+
+    substInterface (JInterface label super) = JInterface (substLabel label) (substType super)
+
+    substFactory (JConstructor label fields super) = JConstructor label (map substField fields) (substType super)
+
+    substRule (Rule typ label rhs e) = Rule (substType typ) label rhs (substExp e)
+
+    substField (x,t) = (x, substType t)
+
+    -- Constructors in the skin are treated as type variables.
+    substType (TCon label []) = substType (TVar (Tyvar label))
+    substType (TCon k ts) = TCon k (map substType ts)
+    substType t               = substTy s t
+
+    substLabel l = case substType (TCon l []) of
+      TCon x []      -> x
+      TVar (Tyvar x) -> x
+      _              -> error $ "cannot substitute label " ++ l
+
+    substExp e = do
+      let e' = substExp' e
       case typeof e' of
         TCon "void" [] -> JK "()" (TCon "void" [])
         t              -> e'
 
-    substExp' s (JNew es t)  = JNew (map (substExp s) es) (substType s t)
-    -- substExp' s (JNew es t) = JNew (map (substExp s) es) t -- do not substitute classes
-    substExp' s (JOp k es t) = JOp k (map (substExp s) es) (substType s t)
-    substExp' s (JK k t)     = JK k (substType s t)
-    substExp' s (JVar x t)   = JVar x (substType s t)
+    substExp' (JNew es t)  = JNew (map substExp es) (substType t)
+    -- substExp' (JNew es t) = JNew (map (substExp s) es) t -- do not substitute classes
+    substExp' (JOp k es t) = JOp k (map substExp es) (substType t)
+    substExp' (JK k t)     = JK k (substType t)
+    substExp' (JVar x t)   = JVar x (substType t)
 
 -- Remove all unused factories.
 -- Remove any rule that calls a dead factory.
@@ -515,12 +610,12 @@ toTypeVar (JInterface label _) = Tyvar label
 crossProduct :: [a] -> [b] -> [(a, b)]
 crossProduct = liftM2 (,)
 
-pick :: Show a => [[a]] -> [[a]]
--- pick ts | trace (show ts) False = undefined
-pick [] = []
-pick [ys] = map return ys
-pick ([]:ys) = pick ys
-pick ((x:xs):ys) = map (\s -> x:s) (pick ys) ++ pick (xs:ys)
+swizzle :: Show a => [[a]] -> [[a]]
+-- swizzle ts | trace (show ts) False = undefined
+swizzle []          = []
+swizzle [ys]        = map return ys
+swizzle ([]:ys)     = swizzle ys
+swizzle ((x:xs):ys) = map (\s -> x:s) (swizzle ys) ++ swizzle (xs:ys)
 
 -- match types (not classes)
 --   use subtypes as weights...
@@ -555,31 +650,30 @@ matchInterfaces skin jast = result
     findPrimitiveMatch :: Subst -> Tyvar -> Maybe (Tyvar, Type)
     -- findPrimitiveMatch (Tyvar "IDENTIFIER") = Just (Tyvar "IDENTIFIER", TCon "String" [])
     findPrimitiveMatch subst (Tyvar i) = do
-        let ifact = filter (\(JConstructor k args (TCon super _)) -> super == i) (factories skin)
-        case ifact of
+        let subclasses = filter (\(JConstructor k args (TCon super _)) -> super == i) (factories skin)
+        case trace ("subclasses of " ++ show i ++ " = " ++ show subclasses) subclasses of
           [] -> Just (Tyvar i, TCon "void" [])
+          [JConstructor k [] _] ->
+            return (Tyvar i, TCon "void" [])
           [JConstructor k [(x, t)] _] -> do
             t' <- applySubst t
             return (Tyvar i, t')
-          [JConstructor k [(x1, t1), (x2, t2)] _] -> do
-            t1' <- applySubst t1
-            t2' <- applySubst t2
-            return (Tyvar i, TCon "(,)" [t1', t2'])
-          [JConstructor k [(x1, t1), (x2, t2), (x3, t3)] _] -> do
-            t1' <- applySubst t1
-            t2' <- applySubst t2
-            t3' <- applySubst t3
-            return (Tyvar i, TCon "(,,)" [t1', t2', t3'])
+          [JConstructor k xts _] -> do
+            ts' <- mapM (applySubst . snd) xts
+            let n = length xts - 1
+            let tupleType = "(" ++ replicate n ',' ++ ")"
+            return (Tyvar i, TCon tupleType ts')
           _ -> Nothing
       where
         applySubst :: Type -> Maybe Type
+        applySubst t | isBuiltin t = Just t
         applySubst (TCon "List" [t]) = fmap (\t' -> TCon "List" [t']) (applySubst t)
         applySubst (TCon "Maybe" [t]) = fmap (\t' -> TCon "Maybe" [t']) (applySubst t)
         applySubst (TCon t []) = lookup (Tyvar t) subst
         applySubst t = Nothing
 
     findSubst = case allSubsts of
-      [] -> error "no subst possible!"
+      []        -> error "no subst possible!"
       allSubsts -> minimumBy (\s1 s2 -> cost s1 `compare` cost s2) allSubsts
 
     allSubsts :: [Subst]
@@ -589,7 +683,7 @@ matchInterfaces skin jast = result
       generateSubsts mappings
 
     generateSubsts :: [[(Cost, Tyvar, Type)]] -> [Subst]
-    generateSubsts ys = pick $ map (map (\(cost, i, j) -> (i, j))) ys
+    generateSubsts ys = swizzle $ map (map (\(cost, i, j) -> (i, j))) ys
 
     cost :: Subst -> Cost
     cost = sum . map (uncurry computeCost)
@@ -615,46 +709,6 @@ matchInterfaces skin jast = result
       let ijcosts = map (uncurry (matchName skin)) ijs
       let ijcount = length (filter (< 0.5) ijcosts)
       renamingCost * if null ijcosts then 1 else 1 - fromIntegral ijcount / fromIntegral (length ijcosts)
-
-matchConstructors2 :: Skin -> JAST -> IO CMapping
-matchConstructors2 skin jast = do
-  let randomList seed = randoms (mkStdGen seed) :: [Probability]
-  seed <- randomIO
-
-  let mapping = matchConstructorsMetropolis (randomList seed) skin jast
-
-  return mapping
-
-runRandom :: [Probability] -> RandomM a -> a
-runRandom = flip evalState
-
-nextRandom :: RandomM Probability
-nextRandom = do
-  randoms <- get
-  put (tail randoms)
-  return (head randoms)
-
-randomIndex :: Int -> RandomM Int
-randomIndex n = do
-  j <- nextRandom
-  let k = round $ j * fromIntegral n
-  if k < 0 || k >= n
-    then randomIndex n
-    else return k
-
--- Not the best shuffling algorithm, but works for our purposes.
--- System.Random.Shuffle is obscure.
-shuffle :: [a] -> RandomM [a]
-shuffle xs = case xs of
-  [] -> return []
-  [x] -> return [x]
-  xs -> do
-    let n = length xs
-    j <- randomIndex n
-    as <- shuffle (drop j xs)
-    bs <- shuffle (take j xs)
-    return $ as ++ bs
-
 
 -- Copied from Typer!
 -- FIXME
@@ -689,200 +743,6 @@ substTy :: Subst -> Type -> Type
 substTy s t @ (TVar x)    = fromMaybe t (lookup x s)
 substTy s (TCon label ts) = TCon label (map (substTy s) ts)
 substTy s TBoh            = TBoh
-
-data CMapping = CMapping [(Rule, JExp)] Subst
-  deriving (Eq, Show)
-
--- Find the free variables of the expression.
--- Find a factory method with matching arguments and matching name.
-matchConstructorsMetropolis :: [Probability] -> Skin -> JAST -> CMapping
-matchConstructorsMetropolis randoms skin jast = result
-  where
-    is :: [Tyvar]
-    is = map toTypeVar (interfaces skin) -- ++ map toType (factories skin)
-
-    js :: [Type]
-    js = map toType (jinterfaces jast) -- ++ map toType (jconstructors jast)
-
-    toTypeVar :: JInterface -> Tyvar
-    toTypeVar (JInterface label super) = Tyvar label
-
-    skinRules :: [Rule]
-    skinRules = rules skin
-
-    exps :: [JExp]
-    exps = jexps jast
-
-    ihierarchy :: M.Map String Type
-    ihierarchy = makeHierarchy (interfaces skin) (factories skin)
-
-    jhierarchy :: M.Map String Type
-    jhierarchy = makeHierarchy (jinterfaces jast) (jconstructors jast)
-
-    result :: CMapping
-    result = runRandom randoms findMapping
-
-    -- We treat the Skin interface types as type variables.
-    -- We map each Skin interface type to a Java type.
-    -- We use unification to check for inconsistencies in the types when generating rule mappings.
-
-    -- generate a random mapping, but don't map an i to more than one j
-    initialMapping :: RandomM CMapping
-    initialMapping = do
-      ts <- initialSubst
-      rs <- initialRuleMapping ts
-      return (CMapping rs ts)
-
-    -- Generate a random substitution.
-    initialSubst :: RandomM Subst
-    initialSubst = do
-      js' <- shuffle js
-      let es = zip is js'
-      return es
-
-    tweakSubst :: Subst -> RandomM Subst
-    tweakSubst s = do
-      i <- randomIndex (length s)
-      let (a, t) = s !! i
-      j <- randomIndex (length js)
-      let t' = js !! j
-      return $ take i s ++ (a, t') : drop (i+1) s
-
-    initialRuleMapping :: Subst -> RandomM [(Rule, JExp)]
-    initialRuleMapping s = do
-      let xs = crossProduct skinRules exps
-      let xs' = filter mguable xs
-      es <- filterM (const selectEdge) xs'
-      es' <- shuffle es
-      return $ removeDups es
-
-    mguable :: (Rule, JExp) -> Bool
-    mguable (Rule (TCon label []) _ _ _, e) =
-      case mgu (TVar (Tyvar label)) (typeof e) of
-        Just s' -> True
-        Nothing -> False
-    mguable (Rule _ _ _ _, _) = False
-
-    removeDups :: Eq a => [(a,b)] -> [(a,b)]
-    removeDups es = go es []
-      where
-        go [] acc = acc
-        go ((i,j):rest) acc =
-              go rest ((i,j):filter (\(i',j') -> i /= i') acc)
-
-    findMapping :: RandomM CMapping
-    findMapping = do
-      ijs <- initialMapping
-      iterateMapping numIterations ijs
-
-    -- Metropolis algorithm parameters
-    beta = fromIntegral $ length is + length js
-    f ijs = exp (- beta * cost ijs)
-    alpha ijs ijs' = min 1 (f ijs' / f ijs)
-    edgeSelectionThreshold = min 0.7 (fromIntegral (length js) / fromIntegral (length is))
-    numIterations = 30 * (length is + length js) + 50 * (length (rules skin) + length exps)
-
-    iterateMapping :: Int -> CMapping -> RandomM CMapping
-    iterateMapping iters ijs =
-      if iters == 0
-        then
-          return ijs
-        else do
-          ijs' <- nextMapping ijs
-          r <- nextRandom
-          if r < alpha ijs ijs'
-            then iterateMapping (iters-1) ijs'
-            else iterateMapping (iters-1) ijs
-
-    selectEdge :: RandomM Bool
-    selectEdge = do
-      r <- nextRandom
-      return $ r < edgeSelectionThreshold
-
-    cost :: CMapping -> Cost
-    cost (CMapping ruleMapping subst) = typeCost subst +
-                 sum (map (rhsCost' subst) ruleMapping) +
-                 sum (map renamingCost' ruleMapping) +
-                 10 * missingCost' ruleMapping
-
-    typeCost :: Subst -> Cost
-    typeCost subst =        sum (map renamingCost subst) +
-                           10 * missingCost subst
-
-    missingCost :: Subst -> Cost
-    missingCost s = fromIntegral $ length is - length s
-
-    renamingCost :: (Tyvar, Type) -> Cost
-    renamingCost (Tyvar i, TCon j []) = if i == j then 0 else matchName skin i j + matchName skin j i
-    renamingCost (_, _) = 99999
-
-    missingCost' :: [(Rule, JExp)] -> Cost
-    missingCost' edges = fromIntegral $ length exps - length edges
-
-    subtypeViolationCost' :: TypeMapping -> ((Rule, JExp), (Rule, JExp)) -> Cost
-    subtypeViolationCost' tm ((Rule t _ _ _, e), (Rule t' _ _ _, e')) =
-      fromIntegral $ length $ filter id [isSubtype ihierarchy t t' /= isSubtype jhierarchy (typeof e) (typeof e'),
-                          isSubtype ihierarchy t' t /= isSubtype jhierarchy (typeof e') (typeof e)]
-
-    siblingViolationCost' :: TypeMapping -> ((Rule, JExp), (Rule, JExp)) -> Cost
-    siblingViolationCost' tm ((Rule t lhs _ _, e), (Rule t' lhs' _ _, e'))
-      | lhs == lhs' && (typeof e) /= (typeof e') = 1
-      | lhs /= lhs' && (typeof e) == (typeof e') = 1
-      | otherwise = 0
-
-    ruleEnv = map (\(Rule t lhs _ _) -> (lhs, t)) (rules skin)
-
-    rhsCost' :: Subst -> (Rule, JExp) -> Cost
-    rhsCost' s (Rule (TCon v []) lhs rhs k, e) = do
-      let t = substTy s (TVar (Tyvar v))
-      case coerce jhierarchy e t of
-        Just e' -> do
-          let fields :: [(Sym, String)] -> [(String, Type)]
-              fields [] = []
-              fields ((Terminal x, y):rhs) = fields rhs
-              fields ((Nonterminal x, y):rhs) = case lookup x ruleEnv of
-                Just t -> (y, t):fields rhs
-                Nothing -> fields rhs
-          case runReader (match1Constructor e (JConstructor lhs (fields rhs) t)) jhierarchy of
-            Match _ _ _ -> 0
-            NoMatch _ -> 99
-        Nothing -> 99
-
-    renamingCost' :: (Rule, JExp) -> Double
-    renamingCost' (Rule t lhs rhs e, JNew es newt) =
-      sum (map (matchName skin lhs) (toBagOfWords newt)) +
-      sum (map (\(x,y) -> matchName skin x y) (liftM2 (,) (toBagOfWords newt) (toBagOfWords e)))
-    renamingCost' (Rule t lhs rhs _, _) = 9999
-
-    -- randomly delete some mappings and add others.
-    nextMapping :: CMapping -> RandomM CMapping
-    nextMapping (CMapping ruleMapping subst) = do
-      r <- nextRandom
-      -- 20.7% we insert a mapping only
-      -- 20.7% we remove a mapping only
-      -- 50% we do both
-      -- 8.6% we do neither
-      ts <- if r < 0.25
-                    then do
-                      tweakSubst subst
-                    else
-                      return subst
-      firstPart <- if r < 0.7071
-                    then do
-                      k <- randomIndex (length ruleMapping)
-                      return $ take k ruleMapping ++ drop (k+1) ruleMapping
-                    else
-                      return ruleMapping
-      r <- nextRandom
-      secondPart <- if r < 0.7071
-                      then do
-                        es <- initialRuleMapping ts
-                        k <- randomIndex (length es)
-                        return $ take 1 (drop k es)
-                      else
-                        return []
-      rs <- shuffle (firstPart ++ secondPart)
-      return $ CMapping (removeDups rs) ts
 
 -- find all the covered rules
 findCoveredRules :: Skin -> [JConstructor] -> [Rule]
@@ -1067,9 +927,6 @@ run skinFile astFile = do
   -- to use the JAST types.
   matchedSkin <- matchTypes typedSkin typedJast
   debug $ "matchedSkin: " ++ show matchedSkin
-
--- mapping <- matchConstructors2 typedSkin typedJast
--- debug $ "mapping: " ++ show mapping
 
   -- Type-check again... This is just a sanity check that matchTypes didn't mess up the types
   typeCheckSkin matchedSkin
