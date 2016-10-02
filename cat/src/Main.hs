@@ -418,12 +418,8 @@ matchName skin = matchNameWithAliases (aliases skin)
 -- Mapping should perform coercions too... we should combine all this with the factory/constructor mapping.
 matchTypes :: Skin -> JAST -> IO Skin
 matchTypes skin jast = do
-  let randomList seed = randoms (mkStdGen seed) :: [Probability]
-  seed <- randomIO :: IO Int
-  let rands = randomList seed
-
   putStrLn "new type matcher"
-  let mapping = matchInterfaces {- rands -} skin jast
+  let mapping = matchInterfaces skin jast
   print mapping
   putStrLn "<< new type matcher"
 
@@ -550,6 +546,8 @@ matchInterfaces skin jast = result
         s1 = findSubst
         missing = filter (not . (`elem` map fst s1)) is
         s2 = mapMaybe (findPrimitiveMatch s1) missing
+        -- TODO: we only use the original s1 in the substitions in findPrimitiveMatch, but we should recursively use s2
+        -- But naively doing so creates a <loop>
 
     -- If there is just one factory for the given type and one field, match that type.
     -- If there are no factories, match with void.
@@ -557,19 +555,28 @@ matchInterfaces skin jast = result
     findPrimitiveMatch :: Subst -> Tyvar -> Maybe (Tyvar, Type)
     -- findPrimitiveMatch (Tyvar "IDENTIFIER") = Just (Tyvar "IDENTIFIER", TCon "String" [])
     findPrimitiveMatch subst (Tyvar i) = do
-      let ifact = filter (\(JConstructor k args (TCon super _)) -> super == i) (factories skin)
-      case ifact of
-        [] -> Just (Tyvar i, TCon "void" [])
-        [JConstructor k [(x, TCon t [])] _] -> case lookup (Tyvar t) subst of
-          Just t' -> Just (Tyvar i, t')
-          Nothing -> Nothing
-        [JConstructor k [(x, TCon "List" [TCon t []])] _] -> case lookup (Tyvar t) subst of
-          Just t' -> Just (Tyvar i, TCon "List" [t'])
-          Nothing -> Nothing
-        [JConstructor k [(x, TCon "Maybe" [TCon t []])] _] -> case lookup (Tyvar t) subst of
-          Just t' -> Just (Tyvar i, TCon "Maybe" [t'])
-          Nothing -> Nothing
-        _ -> Nothing
+        let ifact = filter (\(JConstructor k args (TCon super _)) -> super == i) (factories skin)
+        case ifact of
+          [] -> Just (Tyvar i, TCon "void" [])
+          [JConstructor k [(x, t)] _] -> do
+            t' <- applySubst t
+            return (Tyvar i, t')
+          [JConstructor k [(x1, t1), (x2, t2)] _] -> do
+            t1' <- applySubst t1
+            t2' <- applySubst t2
+            return (Tyvar i, TCon "(,)" [t1', t2'])
+          [JConstructor k [(x1, t1), (x2, t2), (x3, t3)] _] -> do
+            t1' <- applySubst t1
+            t2' <- applySubst t2
+            t3' <- applySubst t3
+            return (Tyvar i, TCon "(,,)" [t1', t2', t3'])
+          _ -> Nothing
+      where
+        applySubst :: Type -> Maybe Type
+        applySubst (TCon "List" [t]) = fmap (\t' -> TCon "List" [t']) (applySubst t)
+        applySubst (TCon "Maybe" [t]) = fmap (\t' -> TCon "Maybe" [t']) (applySubst t)
+        applySubst (TCon t []) = lookup (Tyvar t) subst
+        applySubst t = Nothing
 
     findSubst = case allSubsts of
       [] -> error "no subst possible!"
@@ -606,7 +613,7 @@ matchInterfaces skin jast = result
       -- count the number of subclasses of i that match with subclasses of j
       let ijs = liftM2 (,) (isubclasses i) (jsubclasses j)
       let ijcosts = map (uncurry (matchName skin)) ijs
-      let ijcount = length (filter (< 0.01) ijcosts)
+      let ijcount = length (filter (< 0.5) ijcosts)
       renamingCost * if null ijcosts then 1 else 1 - fromIntegral ijcount / fromIntegral (length ijcosts)
 
 matchConstructors2 :: Skin -> JAST -> IO CMapping
