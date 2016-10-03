@@ -57,7 +57,7 @@ tupleType (s:ss) = TCon label ss
     label = "(" ++ map (const ',') ss ++ ")"
 
 instance Show Type where
-  show (TVar (Tyvar v)) = v
+  show (TVar (Tyvar v)) = '?':v
   show (TCon "->" [s, t]) = show s ++ " -> " ++ show t
   show (TCon "List" [t]) = "[" ++ show t ++ "]"
   show (TCon "(,)" [s,t]) = "(" ++ show s ++ ", " ++ show t ++ ")"
@@ -107,12 +107,13 @@ typeof (JOp op es t) = t
 typeof (JK k t)      = t
 typeof (JVar x t)    = t
 
-data Sym = Nonterminal String | Terminal String
+data Sym = Nonterminal String | Terminal String | Literal String
   deriving (Show, Eq, Ord)
 
 symname :: Sym -> String
 symname (Nonterminal x) = x
 symname (Terminal x)    = x
+symname (Literal x)     = x
 
 instance Ord Rule where
   compare (Rule t1 lhs1 rhs1 _) (Rule t2 lhs2 rhs2 _) =

@@ -94,12 +94,14 @@ addBindings bindings env = env {
 
 rhsBindings rhs env =
   -- trace ("bindings for " ++ show rhs ++ " = " ++ show (map f rhs)) $
-    addBindings (mapMaybe f rhs) env
+    addBindings (mapMaybe bindRhsElement rhs) env
   where
-    f (Nonterminal sym, "_")  = Nothing
-    f (Terminal sym, "_")     = Nothing
-    f (Nonterminal sym, name) = (\x -> (name, x)) <$> M.lookup sym (tyenv env)
-    f (Terminal sym, name)    = (\x -> (name, x)) <$> M.lookup sym (tyenv env)
+    bindRhsElement (Nonterminal sym, "_")  = Nothing
+    bindRhsElement (Terminal sym, "_")     = Nothing
+    bindRhsElement (Literal lit, "_")      = Nothing
+    bindRhsElement (Nonterminal sym, name) = (\t -> (name, t)) <$> M.lookup sym (tyenv env)
+    bindRhsElement (Terminal sym, name)    = (\t -> (name, t)) <$> M.lookup sym (tyenv env)
+    bindRhsElement (Literal lit, name)     = Just (name, TCon "String" [])
 
 bind :: String -> Type -> TC a -> TC a
 bind x t =

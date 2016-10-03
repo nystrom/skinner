@@ -106,6 +106,7 @@ coerce :: SubtypeEnv -> JExp -> Type -> Maybe JExp
 coerce hierarchy e t = go (typeof e) t
   where
     -- s <: t
+    go s t | s == t = Just e
     go s t | isSubtype hierarchy s t = Just e
 
     -- don't generate coercions to or from List[List[t]], etc.
@@ -233,73 +234,11 @@ substVars s (JOp k es t) = JOp k (map (substVars s) es) t
 substVars s (JK k t)     = JK k t
 substVars s (JVar x t)   = fromMaybe (JVar x t) (lookup x s)
 
-match1Constructor :: JExp -> JConstructor -> Reader SubtypeEnv MatchResult
-match1Constructor (new @ (JNew args typ @ (TCon label []))) (k @ (JConstructor skinLabel skinFields skinSuper)) = do
-    let fv = freeVars new
-
-    hierarchy <- ask
-
-    -- make a substitution that coerces the factory method parameters (skinFields) to the right type for the
-    -- free variables (fv) of the constructor call.
-
-    theta <- do -- trace ("matching " ++ show skinFields ++ " in " ++ show k ++ " with " ++ show fv) $ do
-      case (skinFields, fv) of
-        -- HACK: if there are more parameter to the factory method than there are free variables in
-        -- the constructor call, try to group the parameters into a list or array.
-        -- For now, just handle two parameters. This handles the case of binary operators
-        -- that are implemented using lists of operands in the Java AST.
-        ([(y1, t1'), (y2, t2')], [(x, TCon "List" [t])]) | t1' == t2' ->
-          case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) (TCon "List" [t]) of
-            Just e  -> return [(x, e)]
-            Nothing -> return []
-        ([(y1, t1'), (y2, t2')], [(x, TCon "Array" [t])]) | t1' == t2' ->
-          case coerce hierarchy (JOp "toArray2" [JVar y1 t1', JVar y2 t1'] (TCon "Array" [t1'])) (TCon "Array" [t]) of
-            Just e  -> return [(x, e)]
-            Nothing -> return []
-        ([(y1, t1'), (y2, t2')], [(x, t)]) | t1' == t2' ->
-          case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) t of
-            Just e  -> return [(x, e)]
-            Nothing -> return []
-
-        (skinFields, fv) | length skinFields == length fv -> do
-
-          -- We have a call to a constructor in the Java AST.
-          -- We want to see if we can invoke that constructor from the given factory method in the Skin.
-
-          -- To do this, we see if we can coerce each of the parameters of the factory method
-          -- into an argument of the constructor call.
-
-          -- We need to cover all arguments to the constructor call (i.e., those that are free variables of the `new` JExp).
-
-          -- We just assume the free variables and factory parameters are in the same order. This could be relaxed when the types are different.
-          -- In particular, we might have a separate enum parameter that (e.g., PLUS on a BinaryExpression node) that could go anywhere in the parameter list.
-
-          -- TOOD: we need to handle extra arguments like a Position.
-
-          otheta <- forM (zip fv skinFields) $ \((x, t), (y, t')) -> -- trace ("coerce " ++ show (y, t') ++ " to " ++ show t) $
-            case coerce hierarchy (JVar y t') t of
-              Just e  -> return $ Just (x, e)
-              Nothing -> return Nothing
-
-          let theta = catMaybes otheta
-
-          return theta
-        _ ->
-          return []
-
-    if length theta == length fv
-      then do
-        return $ Match 0 k (substVars theta new)
-      else
-        return $ NoMatch new
-
 -- Find the free variables of the expression.
 -- Find a factory method with matching arguments and matching name.
 matchConstructors :: JExp -> Reader (Skin, SubtypeEnv) MatchResult
 matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
-  debug $ "match constructors vs " ++ show new
-
-  (skin, hierarchy) <- ask
+  (skin, hierarchy) <- trace ("match constructors vs " ++ show new) ask
 
   let fv = freeVars new
 
@@ -308,7 +247,7 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
     -- make a substitution that coerces the factory method parameters (skinFields) to the right type for the
     -- free variables (fv) of the constructor call.
 
-    theta <- do -- trace ("matching " ++ show skinFields ++ " in " ++ show k ++ " with " ++ show fv) $ do
+    theta <- trace ("matching " ++ show skinFields ++ " in " ++ show k ++ " with " ++ show fv) $ do
       case (skinFields, fv) of
         -- HACK: if there are more parameter to the factory method than there are free variables in
         -- the constructor call, try to group the parameters into a list or array.
@@ -342,7 +281,7 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
 
           -- TOOD: we need to handle extra arguments like a Position.
 
-          otheta <- forM (zip fv skinFields) $ \((x, t), (y, t')) -> -- trace ("coerce " ++ show (y, t') ++ " to " ++ show t) $
+          otheta <- forM (zip fv skinFields) $ \((x, t), (y, t')) ->
             case coerce hierarchy (JVar y t') t of
               Just e  -> return $ Just (x, e)
               Nothing -> return Nothing
@@ -365,8 +304,6 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
     _            -> return $ NoMatch new
 
 matchConstructors e = return $ NoMatch e
-
-
 
 type SubtypeEnv = M.Map String Type
 
@@ -396,58 +333,14 @@ isSubtype env t1 t2 = case supertype env t1 of
                    Nothing -> False
                    Just t  -> isSubtype env t t2
 
-generateFactoryCalls :: JAST -> [JExp]
-generateFactoryCalls jast = concatMap instConstructor (jconstructors jast)
-  where
-    instConstructor :: JConstructor -> [JExp]
-    instConstructor (JConstructor label fields super) = [JNew es (TCon label []) | es <- expandEnums jast fields]
-
-    expandEnums :: JAST -> [(String, Type)] -> [[JExp]]
-    expandEnums jast xts = go (jenums jast) [map (uncurry JVar) xts]
-      where
-        go :: [JEnum] -> [[JExp]] -> [[JExp]]
-        go [] ess       = removeEnumVars ess
-        go (e:rest) ess = go rest (addEnum e ess)
-
-        removeEnumVars = filter (not . hasEnumVars)
-        hasEnumVars = any isEnumVar
-        isEnumVar ex = any (`isThisEnumVar` ex) (jenums jast)
-        isThisEnumVar (JEnum enum (TCon esuper [])) (JVar x (TCon label [])) | esuper == label = True
-        isThisEnumVar _ _ = False
-
-        addEnum :: JEnum -> [[JExp]] -> [[JExp]]
-        addEnum e = concatMap (addEnum1 e)
-
-        addEnum1 :: JEnum -> [JExp] -> [[JExp]]
-        addEnum1 e es = nub [map (addEnum2 e) es, es]
-
-        addEnum2 :: JEnum -> JExp -> JExp
-        addEnum2 (JEnum enum (TCon esuper [])) (JVar x (TCon label [])) | esuper == label = JK enum (TCon label [])
-        addEnum2 _ ex = ex
-
 matchName :: Skin -> String -> String -> Double
 matchName skin = matchNameWithAliases (aliases skin)
 
--- match types skinhe JAST, rewriting the skin
--- FIXME: currently this works by matching names using only aliases with no forgiveness
--- Also, it maps more than one skin type to the same JAST type, which may be broken (but might not be...)
--- Should, for instance, map both skin Stm and Exp to JAST Expr.
--- TODO: map unmapped types to Void and prune the actions and collapse types.
--- Thus, for an untyped language, want to map Formal to (Type,String) to (void,String) to String.
--- Mapping should perform coercions too... we should combine all this with the factory/constructor mapping.
-matchTypes :: Skin -> JAST -> IO Skin
+-- match interface types in the skin to the JAST, rewriting the skin
+matchTypes :: Monad m => Skin -> JAST -> m Skin
 matchTypes skin jast = do
-  putStrLn "new type matcher"
   let subst = matchInterfaces skin jast
-  print subst
-  putStrLn "<< new type matcher"
-
-  -- let substToVoid = map (\i -> (toTypeVar i, TBoh)) (interfaces skin)
-
-  -- let skin' = removeUnmatchedRules subst skin
-  let skin' = substSkin subst skin
-
-  return skin'
+  return $ trace ("subst " ++ show subst) $ substSkin subst skin
 
 -- Is the skin type used for this particular substitution
 typeUsed :: Subst -> Type -> Bool
@@ -479,7 +372,6 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
     fixToken _      = Nothing
 
     fixInterface :: JInterface -> Maybe JInterface
-    fixInterface i | trace ("fixInterface " ++ show i) False = undefined
     fixInterface (JInterface label t) = do
       guard $ classUsed s (TCon label [])
       guard $ classUsed s t
@@ -503,7 +395,26 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
     fixExp :: JExp -> Maybe JExp
     fixExp (JVar x t)   | typeUsed s t = Just $ JVar x t
     fixExp (JNew es t)  = Just $ JNew (mapMaybe fixExp es) t
-    fixExp (JOp k es t) = Just $ JOp k (mapMaybe fixExp es) t
+    fixExp (JOp k es t) = do
+      es' <- mapM fixExp es
+      -- eliminate calls to factory methods
+      -- the logic is duplicated here from fixPrimitiveMatch ... should be merged
+      let subclasses = filter (\(JConstructor k' args super) -> super == t && k == k') (factories skin)
+      case subclasses of
+        [JConstructor k [] _] ->
+          Just $ JK "()" (TCon "void" [])
+        [JConstructor k [(x, t)] _] ->
+          -- replace the constructor call with just the argument
+          case es' of
+            [e] -> Just e
+            _ -> error $ "bad constructor match " ++ k
+        [JConstructor k xts _] -> do
+          let n = length xts - 1
+          let tupleType = "(" ++ replicate n ',' ++ ")"
+          let ts = map typeof es
+          Just $ JOp tupleType es' (TCon tupleType ts)
+        _ -> {- leave it alone -}
+          Just $ JOp k es' t
     fixExp (JK k t)     | typeUsed s t = Just $ JK k t
     fixExp e            = Nothing
 
@@ -511,8 +422,9 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
     fixRhs = mapM fixElement
 
     fixElement :: (Sym, String) -> Maybe (Sym, String)
-    fixElement (Terminal a, x)    | tokenUsed a       = Just (Terminal a, x)
     fixElement (Nonterminal a, x) | nonterminalUsed a = Just (Nonterminal a, x)
+    fixElement (Terminal a, x)    | tokenUsed a       = Just (Terminal a, x)
+    fixElement (Literal a, x)                         = Just (Literal a, x)
     fixElement _ = Nothing
 
     tokenUsed :: String -> Bool
@@ -546,6 +458,7 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
     substField (x,t) = (x, substType t)
 
     -- Constructors in the skin are treated as type variables.
+    substType t | isBuiltin t = t
     substType (TCon label []) = substType (TVar (Tyvar label))
     substType (TCon k ts) = TCon k (map substType ts)
     substType t               = substTy s t
@@ -571,6 +484,7 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
 -- Remove any rule that calls a dead factory.
 -- Remove any dead nonterminals from RHSs. If this causes a rule to become an epsilon rule, remove the rule.
 -- Repeat...
+
 removeUnreachableRules :: String -> Skin -> JAST -> [Rule]
 removeUnreachableRules start skin jast = filter (`elem` covered) (rules skin)
   where
@@ -651,7 +565,7 @@ matchInterfaces skin jast = result
     -- findPrimitiveMatch (Tyvar "IDENTIFIER") = Just (Tyvar "IDENTIFIER", TCon "String" [])
     findPrimitiveMatch subst (Tyvar i) = do
         let subclasses = filter (\(JConstructor k args (TCon super _)) -> super == i) (factories skin)
-        case trace ("subclasses of " ++ show i ++ " = " ++ show subclasses) subclasses of
+        case subclasses of
           [] -> Just (Tyvar i, TCon "void" [])
           [JConstructor k [] _] ->
             return (Tyvar i, TCon "void" [])
@@ -786,17 +700,17 @@ generateRhs _ _ e | trace ("generateRhs for " ++ show e) False = undefined
 generateRhs parent hierarchy (JNew es (TCon label [])) = do
   k <- makeKeyword label
   rhs <- mapM (generateRhs parent hierarchy) es
-  return $ (Terminal k, "_") : concat rhs
+  return $ (Literal k, "_") : concat rhs
 generateRhs parent hierarchy (JOp label es t) = do
   k <- makeKeyword label
   rhs <- mapM (generateRhs parent hierarchy) es
-  return $ (Terminal k, "_") : concat rhs
+  return $ (Literal k, "_") : concat rhs
 generateRhs parent hierarchy (JVar x t) = do
   lhs <- findSymbolForType parent Contravariant hierarchy t
   return [(lhs, x)]
 generateRhs parent hierarchy (JK label t) = do
   k <- makeKeyword label
-  return [(Terminal k, "_")]
+  return [(Literal k, "_")]
 generateRhs parent hierarchy e =
   error $ "missing case in generateRhs " ++ show e
 
@@ -846,13 +760,13 @@ findSymbolForType parent variance hierarchy t = do
                 return $ Nonterminal name
               TCon "List" [a] -> do
                 token <- findSymbolForType parent variance hierarchy a
-                let lp = (Terminal "(", "_")
-                let rp = (Terminal ")", "_")
+                let lp = (Literal "(", "_")
+                let rp = (Literal ")", "_")
                 let listName = symname token ++ "_list"
                 let name = symname token ++ "_list_brackets"
                 let list = (Nonterminal listName, "as")
                 let one = (token, "a")
-                let comma = (Terminal ",", "_")
+                let comma = (Literal ",", "_")
                 let rule1 = Rule (TCon "List" [a]) listName [one] (JOp ":" [JVar "a" a, JK "Nil" (TCon "List" [a])] (TCon "List" [a]))
                 let rule2 = Rule (TCon "List" [a]) listName [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
                 let rule3 = Rule t name [lp, list, rp] (JVar "as" t)
@@ -935,6 +849,11 @@ run skinFile astFile = do
 
   let jcalls = jexps typedJast
   debug $ "jcalls:\n" ++ intercalate "\n" (map show jcalls)
+
+  let r = runReader (matchConstructors (JNew [JVar "value" (TCon "int" [])] (TCon "Value" []))) (matchedSkin { factories = [JConstructor "IntLit" [("_1", TCon "int" [])] (TCon "Expression" [])] }, hierarchy)
+  print r
+
+  -- error "foo"
 
   debug "Matching AST with skin:"
   matchResults <- forM jcalls $ \k -> case k of

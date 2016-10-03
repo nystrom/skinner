@@ -78,20 +78,20 @@ rule = do
   t <- typ []
   lhs <- name
   punct "::="
-  rhss <- rhs `sepBy` (punct "|")
+  rhss <- rhs `sepBy` punct "|"
   punct ";"
-  return $ map (\(rhs, action) -> Rule t lhs rhs action) rhss
+  return $ map (uncurry (Rule t lhs)) rhss
 
 rhs :: Parser ([(Sym, String)], JExp)
 rhs = do
   syms <- many (try $ nonterm <|> term)
   a <- action
-  return $ (syms, a)
+  return (syms, a)
 
 rhsWithoutAction :: Parser [(Sym, String)]
 rhsWithoutAction = do
   syms <- many (try $ nonterm <|> term)
-  return $ syms
+  return syms
 
 action :: Parser JExp
 action = do
@@ -132,7 +132,7 @@ number :: Parser Int
 number = read <$> many1 digit <* ws
 
 expressions :: Parser [JExp]
-expressions = try $ expression `sepBy` (punct ",")
+expressions = try $ expression `sepBy` punct ","
 
 list :: Parser [JExp] -> Parser JExp
 list p = do
@@ -156,8 +156,8 @@ tuple p = do
 term :: Parser (Sym, String)
 term = do
   x <- stringLiteral
-  option (Terminal x, "_")
-    (punct ":" *> do { k <- name; return (Terminal x, k)})
+  option (Literal x, "_")
+    (punct ":" *> do { k <- name; return (Literal x, k)})
 
 nonterm :: Parser (Sym, String)
 nonterm = do
@@ -165,7 +165,7 @@ nonterm = do
   if x == map toUpper x then
     option (Terminal x, "_")
       (punct ":" *> do { k <- name; return (Terminal x, k)})
-  else do
+  else
     option (Nonterminal x, "_")
       (punct ":" *> do { k <- name; return (Nonterminal x, k)})
 
@@ -175,11 +175,11 @@ datatype = try $ do
   lhs <- name
   params <- many name
   punct "="
-  cases <- (kase params) `sepBy` (punct "|")
+  cases <- kase params `sepBy` punct "|"
   -- return $ (JInterface lhs (TCon "Object" []) :
   --    map (\(label, children) -> JInterface label (TCon lhs [])) (filter (\(label, _) -> label /= lhs) cases),
   --    map (\(label, children) -> JConstructor label (toFields children) (TCon label [])) cases)
-  return $ (JInterface lhs (TCon "Object" []) : [],
+  return ([JInterface lhs (TCon "Object" [])],
      map (\(label, children) -> JConstructor label (toFields children) (TCon lhs [])) cases)
 
 -- fixme: use actual field names for records
