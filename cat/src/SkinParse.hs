@@ -28,7 +28,6 @@ skin = do
   aliases <- many alias
   reserved "ast"
   datatypes <- many datatype
-  reserved "lexer"
   tokens <- many token
   templates <- many template
   reserved "grammar"
@@ -216,7 +215,7 @@ typ params = try $
 
 lexer = P.makeTokenParser
   (haskellDef
-  { P.reservedNames = ["data", "alias", "language", "grammar", "token", "lexer", "template"],
+  { P.reservedNames = ["data", "alias", "language", "grammar", "token", "template"],
     P.reservedOpNames = ["=", "|", "[", "]", "::=", ";", "?", "*", "+", "{", "}", "(", ")", ":"] })
 
 name = P.identifier lexer
