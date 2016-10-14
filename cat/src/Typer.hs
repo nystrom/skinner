@@ -143,6 +143,7 @@ subst s (JVar x t) =
   JVar x (substTy s t)
 
 typeCheck :: JExp -> TC JExp
+typeCheck e | trace ("checking " ++ show e) False = undefined
 typeCheck (JOp "++" [e1, e2] _) = do
   e1' <- typeCheck e1
   e2' <- typeCheck e2

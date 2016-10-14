@@ -105,8 +105,20 @@ expression = try $ cons `chainr1`
   (do { punct "++"; return (\x y -> JOp "++" [x, y] TBoh) })
 
 cons :: Parser JExp
-cons = try $ primary `chainr1`
+cons = try $ try (application <|> primary) `chainr1`
   (do { punct ":"; return (\x y -> JOp ":" [x, y] TBoh) })
+
+variable :: Parser JExp
+variable = try $ do
+  x <- name
+  case x of
+    "Nil" -> return $ JK "Nil" TBoh
+    "Nothing" -> return $ JK "Nothing" TBoh
+    "True" -> return $ JK "true" (TCon "boolean" [])
+    "False" -> return $ JK "false" (TCon "boolean" [])
+    x @ (y:_) | isUpper y -> do
+      return $ JOp x [] TBoh
+    x -> return $ JVar x TBoh
 
 application :: Parser JExp
 application = try $ do
@@ -125,7 +137,7 @@ application = try $ do
     x -> return $ JVar x TBoh
 
 primary :: Parser JExp
-primary = try (application <|> list expressions <|> tuple expressions)
+primary = try (variable <|> list expressions <|> tuple expressions)
 
 number :: Parser Int
 number = read <$> many1 digit <* ws

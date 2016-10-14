@@ -1,0 +1,637 @@
+language Ruby
+
+alias function func fun
+alias method meth function fun member_function
+alias member element
+alias field variable var
+alias var local_variable variable
+alias binary binary_operator binary_op bin_op bin
+alias unary unary_operator unary_op un_op un
+alias array list
+alias list sequence seq
+alias sequence seq
+alias goal compilation_unit program root start file source source_file
+alias add plus additive addition sum
+alias sub minus subtraction
+alias mul times multiplicative multiplication product
+alias div divide division
+alias mod rem remainder modulus
+alias shl lshift left_shift left_bit_shift
+alias shr rshift right_shift right_bit_shift
+alias ushr urshift unsigned_right_shift unsigned_right_bit_shift
+alias and andand boolean_and conditional_and short_circuit_and short_cut_and shortcut_and
+alias or oror boolean_or conditional_or short_circuit_or short_cut_or shortcut_or
+alias not complement logical_not bitwise_not bit_not bitnot
+alias and bitand bit_and bitwise_and logical_and
+alias or bitor bit_or bitwise_or logical_or
+alias xor bitxor bit_xor bitwise_xor logical_xor
+alias null nil null_lit
+alias char character char_lit character_lit
+alias int integer number decimal int_lit
+alias float floating_point float_lit floating_point_lit number real single
+alias double double_float double_lit number real float floating_point float_lit floating_point_lit
+alias class klass clazz
+alias primitive prim
+alias interface iface
+alias literal lit value val
+alias bool boolean bool_lit boolean_lit
+alias expression exp
+alias statement stm stmt cmd command
+alias left_hand_side lhs lvalue
+alias right_hand_side rhs rvalue
+alias assign gets eq equals equal assignment
+alias eq eqeq eq_eq equals equal is_equal
+alias le lte lteq lt_eq less_than_or_equals less_than_equals less_equals
+alias ge gte gteq gt_eq greater_than_or_equals greater_than_equals greater_equals
+alias lt less_than less
+alias gt greater_than greater
+alias ne neq noteq not_eq not_equals disequal unequal nonequal not_equal
+alias dimensions dims
+alias dimension dim
+alias modifier mod flag
+alias lazy on_demand
+alias variable var name
+alias identifier ident id name
+alias parameter param variable local_variable argument
+alias actual argument
+alias formal formal_parameter
+alias if if_then if_then_else cond conditional
+alias cond conditional
+alias declaration decl definition def
+
+ast
+
+data PROGRAM = Program [STATEMENT]
+
+data NAME = GlobalName String
+        | TopLevelName String
+        | Identifier String
+        | AtName String
+
+data STATEMENT = DoBlock EXPRESSION [EXPRESSION] STATEMENT
+         | Block STATEMENT [EXPRESSION]
+         | Undef NAME
+         | Alias NAME NAME
+         | BEGIN STATEMENT
+         | END STATEMENT
+         | AssignStatement EXPRESSION EXPRESSION
+         | AssignWithBlock EXPRESSION EXPRESSION [EXPRESSION] STATEMENT
+         | ExpStatement EXPRESSION
+
+data EXPRESSION =
+         StatementExp STATEMENT
+
+         -- variables (which should be another type -- everything's an EXPRESSION!)
+         | Var NAME                     -- really just identifier and operation
+         | Select EXPRESSION NAME
+         | ModuleSelect EXPRESSION NAME
+         | Tuple [EXPRESSION]
+         | Assoc EXPRESSION EXPRESSION
+         | NilLit
+         | TopLevelModule
+         | Self
+
+         -- function
+         | Call EXPRESSION [EXPRESSION]
+         | Super
+
+        -- argument
+         | Assign EXPRESSION EXPRESSION
+
+         | ModAssign EXPRESSION EXPRESSION
+         | DivAssign EXPRESSION EXPRESSION
+         | SubAssign EXPRESSION EXPRESSION
+         | AddAssign EXPRESSION EXPRESSION
+         | OrAssign EXPRESSION EXPRESSION
+         | XorAssign EXPRESSION EXPRESSION
+         | AndAssign EXPRESSION EXPRESSION
+         | RightShiftAssign EXPRESSION EXPRESSION
+         | LeftShiftAssign EXPRESSION EXPRESSION
+         | MulAssign EXPRESSION EXPRESSION
+         | CondAndAssign EXPRESSION EXPRESSION
+         | CondOrAssign EXPRESSION EXPRESSION
+         | ExponentAssign EXPRESSION EXPRESSION
+
+         | InclusiveRange EXPRESSION EXPRESSION
+         | ExclusiveRange EXPRESSION EXPRESSION
+         | Add EXPRESSION EXPRESSION
+         | Sub EXPRESSION EXPRESSION
+         | Mul EXPRESSION EXPRESSION
+         | Div EXPRESSION EXPRESSION
+         | Mod EXPRESSION EXPRESSION
+         | Exponent EXPRESSION EXPRESSION
+         | UnaryPlus EXPRESSION
+         | UnaryMinus EXPRESSION
+         | BitOr EXPRESSION EXPRESSION
+         | BitXor EXPRESSION EXPRESSION
+         | BitAnd EXPRESSION EXPRESSION
+         | Iff EXPRESSION EXPRESSION
+         | Greater EXPRESSION EXPRESSION
+         | GreaterEqual EXPRESSION EXPRESSION
+         | Less EXPRESSION EXPRESSION
+         | LessEqual EXPRESSION EXPRESSION
+         | Equal EXPRESSION EXPRESSION
+         | StrictEqual EXPRESSION EXPRESSION
+         | NotEqual EXPRESSION EXPRESSION
+         | Matches EXPRESSION EXPRESSION
+         | NotMatches EXPRESSION EXPRESSION
+         | Not EXPRESSION
+         | Complement EXPRESSION
+         | LeftShift EXPRESSION EXPRESSION
+         | RightShift EXPRESSION EXPRESSION
+         | And EXPRESSION EXPRESSION
+         | Or EXPRESSION EXPRESSION
+
+         -- primary
+         | NameExp NAME
+         | ArrayRef EXPRESSION [EXPRESSION]
+         | ListExp [EXPRESSION]
+         | SetExp [EXPRESSION]
+         | MapExp [EXPRESSION]
+         | Return [EXPRESSION]
+         | Yield [EXPRESSION]
+         | Defined EXPRESSION
+         | FunBlock EXPRESSION [EXPRESSION] STATEMENT
+         | If EXPRESSION STATEMENT
+         | IfElse EXPRESSION STATEMENT STATEMENT
+         | While EXPRESSION STATEMENT
+         | Case STATEMENT [WHEN]
+         | For [EXPRESSION] EXPRESSION STATEMENT
+         | Begin STATEMENT [RESCUE] (Maybe STATEMENT)
+         | ClassDecl NAME (Maybe NAME) STATEMENT
+         | Module NAME STATEMENT
+         | Def EXPRESSION [NAME] STATEMENT
+
+         -- literal
+         | NumberLit a
+         | Symbol a
+         | StringLit a
+         | Regexp a
+         | GlobalName a
+
+
+data WHEN = When [EXPRESSION] STATEMENT
+
+-- rescue is the same as When I think, combine!
+data RESCUE = Rescue [EXPRESSION] STATEMENT
+
+
+token String IDENTIFIER
+token double NUMBER
+token String SYMBOL
+token String STRING
+token String STRING2
+token String HERE_DOC
+token String REGEXP
+token void TERM
+
+template EXPRESSION -> EXPRESSION ::= expression:a { a };
+template EXPRESSION -> [EXPRESSION] ::= "(" call_arguments:a ")" { a };
+
+template STATEMENT -> EXPRESSION ::= expression:a { a };
+template STATEMENT -> [EXPRESSION] ::= call_arguments:a { a };
+template STATEMENT -> STATEMENT ::= compound_statement:a { a };
+
+-- template Object -> [A] ::= "(" object_list:a ")" { a };
+
+-- STATEMENT ::= ... ";" if last child not STATEMENT
+-- keyword at the beginning
+-- no nonterminals juxtaposed
+
+grammar
+
+PROGRAM
+goal          ::= program:a                                                                     { a }
+                ;
+
+PROGRAM
+program       ::= compound_statement:a                                                          { Program [a] }
+                ;
+
+STATEMENT
+compound_statement      ::= statement:a term_expr_list:b term_opt                               { Block a b }
+                ;
+
+void
+term_opt      ::= TERM                                  { () }
+                | {- empty -}                           { () }
+                ;
+
+[EXPRESSION]
+term_expr_list ::= expression:a TERM term_expr_list:b          { a:b }
+                | TERM  { [] }
+                ;
+
+STATEMENT
+statement          ::=
+                call:a "do" block_variable_opt:b compound_statement:c "end"          { DoBlock a b c }
+                | "undef" function_name:a                                       { Undef a }
+                | "alias" function_name:a function_name:b                               { Alias a b }
+                | statement:a "if" expression:c                                    { ExpStatement (If c a) }
+                | statement:a "while" expression:c                                 { ExpStatement (While c a) }
+                | statement:a "unless" expression:c                                { ExpStatement (If (Not c) a) }
+                | statement:a "until" expression:c                                 { ExpStatement (While (Not c) a) }
+                | "BEGIN" "{" compound_statement:a "}"                            { BEGIN a }
+                | "END" "{" compound_statement:a "}"                              { END a }
+                | left_hand_side:x "=" command:a                                   { AssignStatement x a }
+                | left_hand_side:x "=" command:a "do" block_variable_opt:b compound_statement:c "end"  { AssignWithBlock x a b c }
+                | expression:a                                                { ExpStatement a }
+                ;
+
+EXPRESSION
+expression    ::= left_hand_sides:a "=" arguments:b                                     { Assign (Tuple a) (Tuple b) }
+                | "return" call_arguments:a                                  { Return a }
+                | "yield" call_arguments:a                                   { Yield a }
+                | command:c                                             { c }
+                | "!" command:c                                         { Not c }
+                | composition:a  { a }
+                ;
+
+EXPRESSION
+composition    ::= composition:a "and" negation:b                                   { And a b }
+                | composition:a "or" negation:b                                    { Or a b }
+                | negation:a  { a }
+                ;
+
+EXPRESSION
+negation      ::= "not" argument:a                                          { Not a }
+                | argument:a                                                 { a }
+                ;
+
+EXPRESSION
+call          ::= function:a                                            { a }
+                | command:a                                             { a }
+                ;
+
+EXPRESSION
+command       ::= operation:a call_arguments:as                              { Call (Var a) as }
+                | primary:a "." operation:b call_arguments:as                { Call (Select a b) as }
+                | primary:a "::" operation:b call_arguments:as               { Call (ModuleSelect a b) as }
+                | "super" call_arguments:as                                  { Call Super as }
+                ;
+
+EXPRESSION
+function      ::= operation:a                                           { Var a }
+                | operation:a "("  ")"                                  { Call (Var a) [] }
+                | operation:a "(" call_arguments:as ")"                 { Call (Var a) as }
+                | primary:a "." operation:b                             { Select a b }
+                | primary:a "." operation:b "("  ")"                    { Call (Select a b) [] }
+                | primary:a "." operation:b "(" call_arguments:as ")"   { Call (Select a b) as }
+                | primary:a "::" operation:b                            { ModuleSelect a b }
+                | primary:a "::" operation:b "("  ")"                   { Call (ModuleSelect a b) [] }
+                | primary:a "::" operation:b "(" call_arguments:as ")"  { Call (ModuleSelect a b) as }
+                | "super" "("  ")"                                      { Call Super [] }
+                | "super" "(" call_arguments:as ")"                     { Call Super as }
+                | "super"                                               { Super }
+                ;
+
+-- TODO precedence
+EXPRESSION
+argument      ::= defined:a { a }
+                ;
+
+EXPRESSION
+defined
+              ::= "defined?" assignment:a                                      { Defined a }
+                | assignment:a { a }
+                ;
+
+EXPRESSION
+assignment    ::= left_hand_side:a "=" assignment:b                                       { Assign a b }
+                | left_hand_side:a "%=" assignment:b                                 { ModAssign a b }
+                | left_hand_side:a "/=" assignment:b                                 { DivAssign a b }
+                | left_hand_side:a "-=" assignment:b                                 { SubAssign a b }
+                | left_hand_side:a "+=" assignment:b                                 { AddAssign a b }
+                | left_hand_side:a "|=" assignment:b                                 { OrAssign a b }
+                | left_hand_side:a "^=" assignment:b                                 { XorAssign a b }
+                | left_hand_side:a "&=" assignment:b                                 { AndAssign a b }
+                | left_hand_side:a ">>=" assignment:b                                 { RightShiftAssign a b }
+                | left_hand_side:a "<<=" assignment:b                                 { LeftShiftAssign a b }
+                | left_hand_side:a "*=" assignment:b                                 { MulAssign a b }
+                | left_hand_side:a "&&=" assignment:b                                 { CondAndAssign a b }
+                | left_hand_side:a "||=" assignment:b                                 { CondOrAssign a b }
+                | left_hand_side:a "**=" assignment:b                                 { ExponentAssign a b }
+                | conditional:a             { a }
+                ;
+
+EXPRESSION
+conditional   ::= range:a { a }
+        | range:a "?" argument:b ":" conditional:c { IfElse a (ExpStatement b) (ExpStatement c) }
+        ;
+
+
+EXPRESSION
+range        ::= range:a ".." cond_or:b                                      { InclusiveRange a b }
+                | range:a "..." cond_or:b                                     { ExclusiveRange a b }
+                | cond_or:a { a }
+                ;
+
+EXPRESSION
+cond_or ::= cond_or:a "||" cond_and:b   { Or a b }
+        | cond_and:a  { a }
+        ;
+
+EXPRESSION
+cond_and ::= cond_and:a "&&" equality:b   { And a b }
+        | equality:a       { a }
+        ;
+
+EXPRESSION
+equality ::= equality:a "<=>" relative:b   { Iff a b }
+                | equality:a "==" relative:b  { Equal a b } 
+                | equality:a "===" relative:b  { StrictEqual a b } 
+                | equality:a "!=" relative:b  { NotEqual a b }
+                | equality:a "!=" relative:b  { Not (Equal a b) }
+                | equality:a "=~" relative:b   { Matches a b }
+                | equality:a "!~" relative:b  { NotMatches a b }
+                | equality:a "!~" relative:b  { Not (Matches a b) }
+                | relative:a { a }
+                ;
+
+EXPRESSION
+relative ::= relative:a "<=" bit_or:b   { LessEqual a b }
+           | relative:a "<" bit_or:b   { Less a b }
+           | relative:a ">=" bit_or:b   { GreaterEqual a b }
+           | relative:a ">" bit_or:b   { Greater a b }
+           | bit_or:a { a }
+        ;
+
+EXPRESSION
+bit_or   ::= 
+                  bit_or:a "|" bit_and:b                                       { BitOr a b }
+                | bit_or:a "^" bit_and:b                                       { BitXor a b }
+                | bit_and:a { a }
+                ;
+
+EXPRESSION
+bit_and   ::= 
+                 bit_and:a "&" shift:b                                       { BitAnd a b }
+                | shift:a { a }
+                ;
+
+EXPRESSION
+shift   ::= 
+                  shift:a "<<" add:b                                       { BitAnd a b }
+                | shift:a ">>" add:b                                       { BitAnd a b }
+                | add:a { a }
+                ;
+
+
+EXPRESSION
+add           ::= add:a "+" mul:b                                       { Add a b }
+                | add:a "-" mul:b                                       { Sub a b }
+                | mul:a { a }
+                ;
+
+EXPRESSION
+mul           ::= mul:a "*" unary:b                                       { Mul a b }
+                | mul:a "/" unary:b                                       { Div a b }
+                | mul:a "%" unary:b                                       { Mod a b }
+                | unary:a { a }
+                ;
+
+EXPRESSION
+unary
+              ::= 
+                 "+" pow:a                                             { UnaryPlus a }
+                | "-" pow:a                                             { UnaryMinus a }
+                | "!" pow:a                                             { Not a }
+                | "~" pow:a                                             { Complement a }
+                | pow:a { a }
+                ;
+
+EXPRESSION
+pow           ::= primary:a "**" pow:b                                      { Exponent a b }
+                | primary:a { a }
+                ;
+
+EXPRESSION
+primary       ::= "(" compound_statement:a ")"                                    { StatementExp a }
+                | literal:a                                             { a }
+                | variable:a                                            { a }
+                | primary:a "::" identifier:b                           { ModuleSelect a b }
+                | "::" identifier:a                                     { ModuleSelect TopLevelModule a }
+                | primary:a "[" "]"                                     { ArrayRef a [] }
+                | primary:a "[" arguments:b "]"                         { ArrayRef a b }
+                | "[" "]"                                               { ListExp [] }
+                | "[" arguments:a "]"                                   { ListExp a }
+                | "[" arguments:a "," "]"                               { ListExp a }
+                | "{" "}"                                               { SetExp [] }
+                | "{" arguments:a  "}"                                  { SetExp a }
+                | "{" assocs:a  "}"                                     { MapExp a }
+                | "{" arguments:a "," "}"                               { SetExp a }
+                | "{" assocs:a "," "}"                                  { MapExp a }
+                | "return"                                              { Return [] }
+                | "return" "("  ")"                                     { Return [] }
+                | "return" "(" call_arguments:a ")"                     { Return a }
+                | "yield"                                               { Yield [] }
+                | "yield" "("  ")"                                      { Yield [] }
+                | "yield" "(" call_arguments:a ")"                      { Yield a }
+                | "defined?" "(" argument:a ")"                         { Defined a }
+                | function:a                                            { a }
+                | function:a "{" block_variable_opt:b compound_statement:c "}"         { FunBlock a b c }
+                | "if" expression:a then compound_statement:b "end"                     { If a b }
+                | "if" expression:a then compound_statement:b else:c "end"              { IfElse a b c }
+                | "unless" expression:a then compound_statement:b "end"                 { If (Not a) b }
+                | "unless" expression:a then compound_statement:b "else" compound_statement:c "end"   { IfElse (Not a) b c }
+                | "while" expression:a do compound_statement:b "end"                    { While a b }
+                | "until" expression:a do compound_statement:b "end"                    { While (Not a) b }
+                | "case" compound_statement:a whens:b "end"                       { Case a b }
+                | "case" compound_statement:a whens:b "else" compound_statement:c "end"     { Case a (b ++ [c]) }
+                | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { For a b c }
+                | "begin" compound_statement:a rescues:b "end"                                            { Begin a b Nothing }
+                | "begin" compound_statement:a rescues:b "else" compound_statement:c "end"                          { Begin a (b ++ [c]) Nothing }
+                | "begin" compound_statement:a rescues:b "ensure" compound_statement:c "end"                        { Begin a b (Just c) }
+                | "begin" compound_statement:a rescues:b "else" compound_statement:c "ensure" compound_statement:d "end"      { Begin a (b ++ [c]) (Just d) }
+                | "class" identifier:a compound_statement:b "end"                 { ClassDecl a Nothing b }
+                | "class" identifier:a "<" identifier:s compound_statement:b "end"        { ClassDecl a (Just s) b }
+                | "module" identifier:a compound_statement:b "end"                { Module a b }
+                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { Def (Var a) as b }
+                | "def" singleton:a "." function_name:b argument_declaration:as compound_statement:c "end"     { Def (Select a b) as c }
+                | "def" singleton:a "::" function_name:b argument_declaration:as compound_statement:c "end"    { Def (Select a b) as c }
+                ;
+
+RESCUE
+rescue        ::= "rescue" arguments:as do compound_statement:b                        { Rescue as b }
+                | "rescue" do compound_statement:b                                { Rescue [] b }
+                ;
+
+[RESCUE]
+rescues       ::= rescue:a rescues:b                                    { a:b }
+                |                                                       { [] }
+                ;
+
+[WHEN]
+whens         ::= when:a whens:b                                        { a:b }
+                | when:a                                                { [a] }
+                ;
+
+WHEN
+when          ::= "when" arguments:a then compound_statement:b                    { When a b }
+                ;
+
+STATEMENT
+else          ::= "elsif" expression:a then compound_statement:b else:c                 { ExpStatement (IfElse a b c) }
+                | "elsif" expression:a then compound_statement:b                        { ExpStatement (If a b) }
+                | "else" compound_statement:a                                     { a }
+                ;
+
+void
+then          ::= TERM                                                  { () }
+                | "then"                                                        { () }
+                | TERM "then"                                                   { () }
+                ;
+
+void
+do            ::= TERM                                                  { () }
+                | "do"                                                  { () }
+                | TERM "do"                                                     { () }
+                ;
+
+[EXPRESSION]
+block_variable     ::= left_hand_side:a                                                 { [a] }
+                | left_hand_sides:a                                                { a }
+                ;
+
+[EXPRESSION]
+block_variable_opt ::= "|" "|"                                               { [] }
+                | "|" block_variable:a "|"                                   { a }
+                |                                                       { [] }
+                ;
+
+[EXPRESSION]
+left_hand_sides          ::= left_hand_sides_item:a ","                                       { [a] }
+                | left_hand_sides_item:a                                             { [a] }
+                | left_hand_sides_item:a "," left_hand_sides:b                      { a:b } 
+                ;
+
+EXPRESSION
+left_hand_sides_item     ::= left_hand_side:a                                                 { a }
+                | "(" left_hand_sides:a ")"                                        { Tuple a }
+                ;
+
+EXPRESSION
+left_hand_side           ::= variable:a                                 { a }
+                | primary:a "[" "]"                                     { ArrayRef a [] }
+                | primary:a "[" arguments:b "]"                         { ArrayRef a b }
+                | primary:a "." identifier:b                            { Select a b }
+                ;
+
+[EXPRESSION]
+call_arguments     ::= arguments:a                                                { a }
+                | arguments:a "," assocs:b                           { a ++ b }
+                | assocs:a                                      { a }
+                | command:a                                             { [a] }
+                ;
+
+[EXPRESSION]
+arguments          ::= argument:a "," arguments:b                                  { a:b }
+                | argument:a { [a] }
+                ;
+
+[NAME]
+argument_declaration       ::= "(" formals:a ")"                             { a }
+                 | "(" ")"                                        { [] }
+                | formals:a TERM                                { a }
+                ;
+
+[NAME]
+formals ::= formal:a "," formals:b                { a:b }
+                | formal:a                                     { [a] }
+                ;
+
+NAME
+formal  ::= identifier:a { a }
+                ;
+
+EXPRESSION
+singleton     ::= variable:a                                    { a }
+                | "(" expression:a ")"                                { a }
+                ;
+
+[EXPRESSION]
+assocs        ::= assoc:a "," assocs:b                          { a:b }
+                | assoc:a                                       { [a] }
+                ;
+
+EXPRESSION
+assoc         ::= argument:a "=>" argument:b                              { Assoc a b }
+                ;
+
+EXPRESSION
+variable      ::= var_name:a                                     { NameExp a }
+                | "nil"                                         { NilLit }
+                | "self"                                        { Self }
+                ;
+
+EXPRESSION
+literal       ::= NUMBER:a                                      { NumberLit a }
+                | STRING:a                                      { StringLit a }
+                | STRING2:a                                     { StringLit a }
+                | HERE_DOC:a                                    { StringLit a }
+                | REGEXP:a                                      { Regexp a }
+                | symbol:a                                      { a }
+                ;
+
+void
+TERM          ::= ";"           { () }
+                | NEWLINE           { () }
+                ;
+
+NAME
+identifier ::= IDENTIFIER:a { Identifier a }
+                ;
+
+EXPRESSION
+symbol ::=  ":" "@" IDENTIFIER:a { Symbol a }
+        | ":" IDENTIFIER:a { Symbol a }
+        ;
+
+NAME
+function_name ::= IDENTIFIER:a { Identifier a }
+        | "..":a { Identifier a }
+        | "|":a { Identifier a }
+        | "^":a { Identifier a }
+        | "&":a { Identifier a }
+        | "<=>":a { Identifier a }
+        | "==":a { Identifier a }
+        | "===":a { Identifier a }
+        | "=~":a { Identifier a }
+        | ">":a { Identifier a }
+        | "<":a { Identifier a }
+        | "<=":a { Identifier a }
+        | ">=":a { Identifier a }
+        | "+":a { Identifier a }
+        | "-":a { Identifier a }
+        | "*":a { Identifier a }
+        | "/":a { Identifier a }
+        | "%":a { Identifier a }
+        | "**":a { Identifier a }
+        | "<<":a { Identifier a }
+        | ">>":a { Identifier a }
+        | "~":a { Identifier a }
+        | "+@":a { Identifier a }
+        | "-@":a { Identifier a }
+        | "[]":a { Identifier a }
+        | "[]=":a { Identifier a }
+        ;
+
+-- FIXME: should add the ! and ? to the name
+NAME
+operation ::= IDENTIFIER:a "!" { Identifier a }
+            | IDENTIFIER:a "?" { Identifier a }
+            | IDENTIFIER:a { Identifier a }
+            ;
+
+NAME
+var_name ::= IDENTIFIER:a { Identifier a }
+        | "@" IDENTIFIER:a { AtName a }
+        | global_name:a { a }
+        ;
+
+NAME
+global_name ::= "$" IDENTIFIER:a { GlobalName a }
+        ;
+
+
+

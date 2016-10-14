@@ -52,7 +52,7 @@ funType' ss t = funType (tupleType ss) t
 tupleType :: [Type] -> Type
 tupleType [] = TCon "void" []
 tupleType [s] = s
-tupleType (s:ss) = TCon label ss
+tupleType (s:ss) = TCon label (s:ss)
   where
     label = "(" ++ map (const ',') ss ++ ")"
 
