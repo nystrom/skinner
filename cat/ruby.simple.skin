@@ -86,7 +86,7 @@ data EXPRESSION =
          | Select EXPRESSION NAME
          | ModuleSelect EXPRESSION NAME
          | Tuple [EXPRESSION]
-         | Assoc EXPRESSION EXPRESSION
+         | KeyValue EXPRESSION EXPRESSION
          | NilLit
          | TopLevelModule
          | Self
@@ -158,9 +158,7 @@ data EXPRESSION =
          | Case STATEMENT [WHEN]
          | For [EXPRESSION] EXPRESSION STATEMENT
          | Begin STATEMENT [RESCUE] (Maybe STATEMENT)
-         | ClassDecl NAME (Maybe NAME) STATEMENT
-         | Module NAME STATEMENT
-         | Def EXPRESSION [NAME] STATEMENT
+         | Declaration DECLARATION
 
          -- literal
          | NumberLit a
@@ -168,6 +166,11 @@ data EXPRESSION =
          | StringLit a
          | Regexp a
          | GlobalName a
+
+data DECLARATION = 
+           Class NAME (Maybe NAME) STATEMENT
+         | Module NAME STATEMENT
+         | Function EXPRESSION [NAME] STATEMENT
 
 
 data WHEN = When [EXPRESSION] STATEMENT
@@ -443,12 +446,12 @@ primary       ::= "(" compound_statement:a ")"                                  
                 | "begin" compound_statement:a rescues:b "else" compound_statement:c "end"                          { Begin a (b ++ [c]) Nothing }
                 | "begin" compound_statement:a rescues:b "ensure" compound_statement:c "end"                        { Begin a b (Just c) }
                 | "begin" compound_statement:a rescues:b "else" compound_statement:c "ensure" compound_statement:d "end"      { Begin a (b ++ [c]) (Just d) }
-                | "class" identifier:a compound_statement:b "end"                 { ClassDecl a Nothing b }
-                | "class" identifier:a "<" identifier:s compound_statement:b "end"        { ClassDecl a (Just s) b }
-                | "module" identifier:a compound_statement:b "end"                { Module a b }
-                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { Def (Var a) as b }
-                | "def" singleton:a "." function_name:b argument_declaration:as compound_statement:c "end"     { Def (Select a b) as c }
-                | "def" singleton:a "::" function_name:b argument_declaration:as compound_statement:c "end"    { Def (Select a b) as c }
+                | "class" identifier:a compound_statement:b "end"                 { Declaration (Class a Nothing b) }
+                | "class" identifier:a "<" identifier:s compound_statement:b "end"        { Declaration (Class a (Just s) b) }
+                | "module" identifier:a compound_statement:b "end"                { Declaration (Module a b) }
+                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { Declaration (Function (Var a) as b) }
+                | "def" singleton:a "." function_name:b argument_declaration:as compound_statement:c "end"     { Declaration (Function (Select a b) as c) }
+                | "def" singleton:a "::" function_name:b argument_declaration:as compound_statement:c "end"    { Declaration (Function (Select a b) as c) }
                 ;
 
 RESCUE
@@ -555,7 +558,7 @@ assocs        ::= assoc:a "," assocs:b                          { a:b }
                 ;
 
 EXPRESSION
-assoc         ::= argument:a "=>" argument:b                              { Assoc a b }
+assoc         ::= argument:a "=>" argument:b                              { KeyValue a b }
                 ;
 
 EXPRESSION
