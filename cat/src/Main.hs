@@ -3,6 +3,7 @@
 module Main (main) where
 
 import           Control.Applicative  ((*>), (<$), (<$>), (<*), (<*>))
+import Control.Applicative ((<|>))
 import           Control.Monad.Reader
 import           Control.Monad.State
 
@@ -10,7 +11,7 @@ import           Data.Char            (isLower, isUpper, toLower, toUpper)
 import           Data.List            (find, intercalate, intersect, minimum,
                                        minimumBy, nub, sortBy, sortOn, (\\))
 import qualified Data.Map             as M
-import           Data.Maybe           (catMaybes, fromMaybe, isJust, isNothing,
+import           Data.Maybe           (catMaybes, fromMaybe, fromJust, isJust, isNothing,
                                        listToMaybe, mapMaybe)
 import           Data.Monoid
 import           Data.Tuple           (swap)
@@ -103,6 +104,21 @@ convertPrimitive :: Type -> Type -> JExp -> Maybe JExp
 convertPrimitive (TCon s []) (TCon t []) e | s == t = Just e
 convertPrimitive (TCon s []) (TCon t []) e | isPrimitiveNumber (TCon s []) && isPrimitiveNumber (TCon t []) = Just $ JOp (s ++ "2" ++ t) [e] (TCon t [])
 convertPrimitive _ _ _ = Nothing
+
+isBuiltinOp :: JExp -> Bool
+isBuiltinOp (JOp "Just" [e] t) =  True
+isBuiltinOp (JK "Nothing" t) = True
+isBuiltinOp (JK "Nil" (TCon _ [base])) = True
+isBuiltinOp (JOp ":" es t) = True
+isBuiltinOp (JOp "++" es t) = True
+isBuiltinOp (JOp "toMaybe" [e] (TCon _ [base])) = True
+isBuiltinOp (JOp "unMaybe" [e] (TCon _ [base])) = True
+isBuiltinOp (JOp "maybeToList" [e] (TCon _ [base])) = True
+isBuiltinOp (JOp "listToArray" [e] (TCon _ [base])) = True
+isBuiltinOp (JOp "arrayToList" [e] (TCon _ [base])) = True
+isBuiltinOp (JOp "toArray2" [e1, e2] (TCon _ [base])) = True
+isBuiltinOp (JOp "toList2" [e1, e2] (TCon _ [base])) = True
+isBuiltinOp e = False
 
 coerce :: SubtypeEnv -> JExp -> Type -> Maybe JExp
 coerce hierarchy e t = go (typeof e) t
@@ -395,7 +411,7 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
     fixRule :: Rule -> Maybe Rule
     fixRule (Rule t lhs rhs e) = do
       rhs' <- fixRhs rhs
-      e' <- fixExp e
+      e' <- fixExp e <|> return (JK "null" (typeof e))
       guard $ typeUsed s t
       return $ Rule t lhs rhs' e'
 
@@ -407,23 +423,43 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
       guard $ typeUsed s t2
       return $ Template t1 t2 rhs' e'
 
+    toTyvar t | isBuiltin t = t
+    toTyvar t @ (TCon label []) | isBuiltin t = TVar (Tyvar label)
+    toTyvar (TCon label ts) = TCon label (map toTyvar ts)
+
     fixExp :: JExp -> Maybe JExp
     fixExp (JVar x t)   | typeUsed s t = Just $ JVar x t
     fixExp (JNew es t)  = Just $ JNew (mapMaybe fixExp es) t
-    fixExp (JOp k es t) | typeUsed s t = do
+
+    -- use mapM to return Nothing if any sub-exp cannot be fixed
+    -- use mapMaybe to return Nothing if all sub-exps cannot be fixed -- this will remove unfixed expressions
+
+    -- allow the built-in operations
+    fixExp e @ (JOp op es t) | isBuiltinOp e = do
       es' <- mapM fixExp es
+      return $ JOp op es' t
+
+    fixExp (JOp k es t) | trace ("fixExp " ++ show (JOp k es t) ++ " -- subst type " ++ show (substType t)) False = undefined
+
+    fixExp (JOp k es t) | typeUsed s t && not (isBuiltin (substType t)) = do
+      -- EXCLUDE builtin types here since we need to eliminate the constructor call for these
+      let es' = mapMaybe fixExp es
       return $ JOp k es' t
-    fixExp (JOp k es t) = do
-      es' <- mapM fixExp es
+
+
+    fixExp (JOp k es t) | trace ("fixExp not used or built-in " ++ show (JOp k es t) ++ " -- " ++ show s) False = undefined
+    fixExp (JOp k es t) | typeUsed s t = do
+      let es' = mapMaybe fixExp es
       -- eliminate calls to factory methods
       -- the logic is duplicated here from fixPrimitiveMatch ... should be merged
       let subclasses = filter (\(JConstructor k' args super) -> super == t && k == k') (factories skin)
       case subclasses of
         [JConstructor k [] _] ->
           Just $ JK "()" (TCon "void" [])
-        [JConstructor k [(x, t)] _] ->
+        [JConstructor k [(x, t)] _] -> do
           -- replace the constructor call with just the argument
-          case es' of
+          es'' <- mapM fixExp es
+          case es'' of
             [e] -> Just e
             _ -> error $ "bad constructor match " ++ k
         [JConstructor k xts _] -> do
@@ -437,7 +473,10 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
     fixExp e            = Nothing
 
     fixRhs :: [(Sym, String)] -> Maybe [(Sym, String)]
-    fixRhs = mapM fixElement
+    fixRhs [] = Just []
+    fixRhs rhs = case (mapMaybe fixElement rhs) of   -- if we make a non-empty RHS empty, remove it
+      [] -> Nothing
+      rhs' -> Just rhs'
 
     fixElement :: (Sym, String) -> Maybe (Sym, String)
     fixElement (Nonterminal a, x) | nonterminalUsed a = Just (Nonterminal a, x)
@@ -503,26 +542,87 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
 -- Remove any dead nonterminals from RHSs. If this causes a rule to become an epsilon rule, remove the rule.
 -- Repeat...
 
+fixRules :: ([Rule] -> [Rule]) -> [Rule] -> [Rule]
+fixRules f rules | trace ("fix " ++ show rules) False = undefined
+fixRules f rules = do
+  let rules' = f rules
+  if rules == rules'
+    then rules
+    else fixRules f rules'
+
 removeUnusedRules :: [MatchResult] -> [Rule] -> [Rule]
-removeUnusedRules matchResults rules = removeDeadRules coveredRules
+removeUnusedRules matchResults = (fixRules (removeDeadRules)) . coveredRules
   where
-    coveredRules = findCoveredRules (mapMaybe getConstructor matchResults) rules
+    coveredRules = tracef "coveredRules" (findCoveredRules (mapMaybe getConstructor matchResults))
 
-    removeDeadRules = filter ruleUsed
+    reachableRules = tracef "reachableRules" (\rules -> reachable rules (startRules rules))
 
-    ruleUsed (Rule _ lhs rhs _) = all rhsUsed rhs
+    startRules rules = case goal rules of
+      Nothing -> []
+      Just s -> findRulesFor s rules
 
-    rhsUsed (Nonterminal x, _) = x `elem` map (\(Rule _ lhs _ _) -> lhs) coveredRules
-    rhsUsed (Terminal x, _) = True
-    rhsUsed (Literal x, _) = True
+    -- HACK -- hardcode the start rule as goal
+    goal _ = Just "goal"
+    -- goal (Rule _ x _ _:rs) = Just x
+    -- goal [] = Nothing
+
+    tracef s f x = trace (s ++ "(" ++ show x ++  ") = " ++ show (f x)) (f x)
+
+    -- filter all rules where the LHS is used in some other rule
+    removeDeadRules :: [Rule] -> [Rule]
+    removeDeadRules rules | trace ("removeDeadRules " ++ show rules) False = undefined
+    removeDeadRules rules = filter ruleUsed rules
+      where
+        ruleUsed = tracef "ruleUsed" ruleUsed2
+
+        ruleUsed2 (Rule _ lhs _ _) = any (ntUsed lhs) rules
+
+        ntUsed lhs (Rule _ _ rhs _) = any (ntUsed' lhs) rhs
+
+        ntUsed' lhs (Nonterminal x, _) = x == lhs
+        ntUsed' lhs _ = False
+
+    -- filter all rules where all nonterminals on the RHS are defined
+    removeRulesWithUndefinedRHS :: [Rule] -> [Rule]
+    removeRulesWithUndefinedRHS rules | trace ("removeRulesWithUndefinedRHS " ++ show rules) False = undefined
+    removeRulesWithUndefinedRHS rules = filter ruleUsed rules
+      where
+        ruleUsed = tracef "ruleUsed" ruleReallyUsed
+
+        ruleReallyUsed (Rule _ lhs rhs _) = all rhsUsed rhs
+
+        rhsUsed (Nonterminal x, _) = x `elem` map (\(Rule _ lhs _ _) -> lhs) rules
+        rhsUsed (Terminal x, _) = True
+        rhsUsed (Literal x, _) = True
+
+    findRulesFor :: String -> [Rule] -> [Rule]
+    {-
+    findRulesFor lhs rules = (tracef ("find(" ++ lhs ++ " in " ++ show rules ++ ")")
+                (findRulesFor2 lhs)) rules
+                -}
+    findRulesFor lhs = filter (\(Rule _ x _ _) -> lhs == x)
+
+    reachable :: [Rule] -> [Rule] -> [Rule]
+    reachable allRules rules = (fixRules (\rules -> nub (moreRules rules))) rules
+      where
+        moreRules :: [Rule] -> [Rule]
+        moreRules rules = concatMap (`findRulesFor` allRules) ((tracef "nt" nonterminals) rules)
+
+        nonterminals :: [Rule] -> [String]
+        nonterminals rules = nub $ concatMap nonterminalsInRule rules
+
+        nonterminalsInRule :: Rule -> [String]
+        nonterminalsInRule (Rule t lhs rhs e) = nub $ lhs : mapMaybe nt rhs
+
+        nt (Nonterminal x, _) = Just x
+        nt _ = Nothing
 
     getConstructor :: MatchResult -> Maybe JConstructor
     getConstructor (Match cost c e) = Just c
     getConstructor _ = Nothing
 
-    findRulesFor lhs = filter (\(Rule _ x _ _) -> lhs == x)
-
 -- find all the covered rules
+-- these are rules that either invoke a matched constructor or invoke no constructor
 findCoveredRules :: [JConstructor] -> [Rule] -> [Rule]
 findCoveredRules ks = filter ruleInvokesOnlyTheseConstructors
   where
@@ -531,9 +631,7 @@ findCoveredRules ks = filter ruleInvokesOnlyTheseConstructors
     expInvokesOnlyTheseConstructors (JVar x t)    = True
     expInvokesOnlyTheseConstructors (JK k t)      = True
     expInvokesOnlyTheseConstructors (JNew es t)   = all expInvokesOnlyTheseConstructors es
-    expInvokesOnlyTheseConstructors (JOp "Just" es t) = all expInvokesOnlyTheseConstructors es
-    expInvokesOnlyTheseConstructors (JOp ":" es t) = all expInvokesOnlyTheseConstructors es
-    expInvokesOnlyTheseConstructors (JOp "++" es t) = all expInvokesOnlyTheseConstructors es
+    expInvokesOnlyTheseConstructors e @ (JOp op es t) | isBuiltinOp e = all expInvokesOnlyTheseConstructors es
     expInvokesOnlyTheseConstructors (JOp op es t) = any (\(JConstructor label _ _) -> label == op) ks && all expInvokesOnlyTheseConstructors es
 
     typeMatchesTheseConstructors t | trace ("typeMatchesTheseConstructors " ++ show t) False = undefined
@@ -758,10 +856,15 @@ addRuleForType parent variance hierarchy t = do
     [Template _ _ rhs action] -> do
       let name = show t
       let rule = Rule t name rhs action
-      modify (\skin -> skin { rules = rule : rules skin })
+      addRule rule
       return $ Nonterminal name
     _ ->
       createRuleForType parent variance hierarchy t
+
+-- add new rules at the end -- this preserves the invariant that the start rule is first
+addRule :: Rule -> State Skin ()
+addRule rule = do
+  modify (\skin -> skin { rules = rules skin ++ [rule] })
 
 createRuleForType :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
 createRuleForType parent variance hierarchy t =
@@ -802,7 +905,10 @@ createRuleForList parent variance hierarchy a = do
   let rule2 = Rule (TCon "List" [a]) listName [one, comma, list] (JOp ":" [JVar "a" a, JVar "as" (TCon "List" [a])] (TCon "List" [a]))
   let rule3 = Rule t name [lp, list, rp] (JVar "as" t)
   let rule4 = Rule t name [lp, rp] (JK "Nil" t)
-  modify (\skin -> skin { rules = [rule1, rule2, rule3, rule4] ++ rules skin })
+  addRule rule1
+  addRule rule2
+  addRule rule3
+  addRule rule4
   return $ Nonterminal name
 
 createRuleForArray :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
@@ -811,7 +917,7 @@ createRuleForArray parent variance hierarchy a = do
   let t = TCon "Array" [a]
   let name = symname list ++ "_array"
   let rule = Rule t name [(list, "as")] (JOp "listToArray" [JVar "as" (TCon "List" [a])] t)
-  modify (\skin -> skin { rules = rule : rules skin })
+  addRule rule
   return $ Nonterminal name
 
 parseAndCheck p filename = do
@@ -828,8 +934,14 @@ makeNewRules matchResults hierarchy = do
     NoMatch e -> do
       Nonterminal lhs <- findSymbolForType Nothing Covariant hierarchy (typeof e)
       rhs <- generateRhs (Just (typeof e)) hierarchy e
-      let rule = Rule (typeof e) lhs rhs e
-      modify (\skin -> skin { rules = rule : rules skin })
+      let t = case typeof e of
+                TCon label [] ->
+                  case M.lookup label hierarchy of
+                    Just t -> t
+                    Nothing -> TCon label []
+                t -> t
+      let rule = Rule t lhs rhs e
+      addRule rule
       return ()
     _ -> return ()
   return ()
@@ -866,6 +978,10 @@ run skinFile astFile = do
   matchedSkin <- matchTypes typedSkin typedJast
   debug $ "matchedSkin: " ++ show matchedSkin
 
+  putStrLn "original rules (with types subst'ed)"
+  forM_ (rules matchedSkin) print
+  putStrLn "<< original rules (with types subst'ed)"
+
   -- Type-check again... This is just a sanity check that matchTypes didn't mess up the types
   typeCheckSkin matchedSkin
 
@@ -881,6 +997,9 @@ run skinFile astFile = do
     _ ->
       return $ NoMatch k
 
+  putStrLn "factories"
+  forM_ (filter isMatch matchResults) print
+  putStrLn "<< factories"
 
   -- For each unmatched constructor call, for each subexpression of the
   -- call, make sure there is a grammar rule for that subexpression's type.
@@ -889,38 +1008,28 @@ run skinFile astFile = do
 
   -- For each unmatched constructor, generate a new factory method and generate a new rule that invokes that method.
 
-  putStrLn "original rules (with types subst'ed)"
-  forM_ (rules matchedSkin) print
-  putStrLn "<< original rules (with types subst'ed)"
-
-
-  putStrLn "removed unreachable rules"
-  let reducedSkin = matchedSkin { rules = removeUnusedRules matchResults (rules matchedSkin) }
-  forM_ (rules reducedSkin) print
-  putStrLn "<< removed unreachable rules"
-
   -- Unlike when matching, include the constructors in the subtype hierarchy when generating new rules.
   let hierarchyWithConstructors = makeHierarchy (jinterfaces typedJast) (jconstructors typedJast)
-  -- let hierarchyWithConstructors = M.insert "Method" (TCon "Declaration" []) hierarchy
-  let skinWithNewRules = execState (makeNewRules matchResults hierarchyWithConstructors) reducedSkin
+  let skinWithNewRules = execState (makeNewRules matchResults hierarchyWithConstructors) matchedSkin
 
   putStrLn "new rules"
   forM_ (rules skinWithNewRules) print
   putStrLn "<< new rules"
 
-  putStrLn "factories"
-  forM_ (filter isMatch matchResults) print
-  putStrLn "<< factories"
+  putStrLn "removed unused rules"
+  let reducedSkin = skinWithNewRules { rules = removeUnusedRules matchResults (rules skinWithNewRules) }
+  putStrLn "<< removed unused rules"
 
-  -- Need to prune the grammar.
-  -- Starting at root symbol ("goal")
-  -- eliminate rhs symbols that aren't covered by the factory calls
+  putStrLn "without unused rules"
+  forM_ (rules reducedSkin) print
+  putStrLn "<< without unused rules"
 
   let g = Grammar {
     gheader = jheader jast,
     gbody = jbody jast,
-    grules = rules skinWithNewRules,
-    gfactories = mapMaybe matchToFactory matchResults
+    grules = rules reducedSkin,
+    gfactories = mapMaybe matchToFactory matchResults,
+    gtokens = tokens reducedSkin ++ concatMap ruleTokens (rules reducedSkin)
   }
 
   putStrLn "grammar"
@@ -932,8 +1041,13 @@ run skinFile astFile = do
 loadAliases :: String -> IO [[String]]
 loadAliases file = aliases <$> parseAndCheck skin file
 
+ruleTokens (Rule t lhs rhs e) = mapMaybe rhsToken rhs
+  where
+    rhsToken (Literal a, _) = Just (literalToToken a, TCon "String" [])
+    rhsToken _ = Nothing
 
-data Grammar = Grammar { gheader :: String, gbody :: String, grules :: [Rule], gfactories :: [JFactory] }
+
+data Grammar = Grammar { gheader :: String, gbody :: String, grules :: [Rule], gfactories :: [JFactory], gtokens :: [(String, Type)] }
   deriving Show
 
 type JFactory = (JConstructor, JExp)
@@ -944,6 +1058,55 @@ matchToFactory _ = Nothing
 class PP a where
   pp :: a -> String
 
+ppTerminalDeclarations tokens rules = nub $ mapMaybe go tokens
+  where
+    go (x, t) = Just $ "terminal " ++ pp t ++ " " ++ x ++ ";"
+    -- go (Rule t lhs rhs _) = mapMaybe go' rhs
+    -- go' (Terminal a, _) = lookup a tokens >>= \t -> Just $ "terminal " ++ pp t ++ " " ++ a ++ ";"
+    -- go' (Literal a, _) = Just $ "terminal String " ++ (literalToToken a) ++ ";"
+    -- go' _ = Nothing
+
+ppNonterminalDeclarations rules = nub $ map go rules
+  where
+    go (Rule t lhs rhs _) = "non terminal " ++ pp t ++ " " ++ lhs ++ ";"
+
+literalToToken s = "TOKEN_" ++ join (map go s)
+  where
+    go '(' = "_LPAREN"
+    go ')' = "_RPAREN"
+    go '{' = "_LBRACE"
+    go '}' = "_RBRACE"
+    go '[' = "_LBRACK"
+    go ']' = "_RBRACK"
+    go '<' = "_LT"
+    go '>' = "_GT"
+    go '=' = "_EQ"
+    go '.' = "_DOT"
+    go ',' = "_COMMA"
+    go '?' = "_QUESTION"
+    go '!' = "_BANG"
+    go '\'' = "_SQUOT"
+    go '`' = "_BQUOT"
+    go '\"' = "_DQUOT"
+    go '$' = "_DOLLAR"
+    go '@' = "_AT"
+    go '%' = "_PERCENT"
+    go '^' = "_CARET"
+    go '&' = "_AND"
+    go '*' = "_STAR"
+    go '-' = "_DASH"
+    go '_' = "_UNDERSCORE"
+    go '+' = "_PLUS"
+    go '\\' = "_BACKSLASH"
+    go '/' = "_SLASH"
+    go '|' = "_BAR"
+    go ';' = "_SEMI"
+    go ':' = "_COLON"
+    go '~' = "_TWIDDLE"
+    go c = [c]
+
+-- TODO: goal rule gets deleted
+-- TODO: eliminate rules with dead nonterminals on the rhs
 instance PP Grammar where
   pp g = unlines $
                  ["// Grammar generated by Skinner."
@@ -962,24 +1125,37 @@ instance PP Grammar where
                  ,gbody g
                  ,""
                  ]
+                 ++ library
+                 ++ [""]
                  ++ map pp (gfactories g)
-                 ++
-                 [":}"
-                 ]
-                 {- TODO declare terminals and nonterminals -}
+                 ++ [":}"]
+                 ++ ["scan with {: return nextSymbol(); :};"]
+                 ++ [""]
+                 ++ ppTerminalDeclarations (gtokens g) (grules g)
+                 ++ [""]
+                 ++ ppNonterminalDeclarations (grules g)
+                 ++ [""]
                  ++ ["start with goal;"]
+                 ++ [""]
                  ++ map pp (grules g)
 
+
+library :: [String]
+library =
+  ["<T> List<T> consList(T x, List<T> xs) { List<T> ys = new ArrayList<T>(); ys.add(x); ys.addAll(xs); return ys; }"
+  ,"<T> List<T> appendLists(List<T> xs, List<T> ys) { List<T> zs = new ArrayList<T>(); zs.addAll(xs); zs.addAll(ys); return zs; }"
+  ]
+
 instance PP Rule where
-  pp (Rule t lhs rhs e) = pp t ++ " " ++ lhs ++ " ::= " ++ intercalate " " (map pp rhs) ++ "\n        {: RESULT = " ++ pp e ++ "; :}\n    ;\n"
+  pp (Rule t lhs rhs e) = lhs ++ " ::= " ++ intercalate " " (map pp rhs) ++ "\n        {: RESULT = " ++ pp e ++ "; :}\n    ;\n"
 
 instance PP (Sym, String) where
   pp (Nonterminal a, "_") = a
   pp (Terminal a, "_") = a
-  pp (Literal a, "_") = show a
+  pp (Literal a, "_") = literalToToken a
   pp (Nonterminal a, x) = a ++ ":" ++ x
   pp (Terminal a, x) = a ++ ":" ++ x
-  pp (Literal a, x) = show a ++ ":" ++ x
+  pp (Literal a, x) = literalToToken a ++ ":" ++ x
 
 instance PP (String, Type) where
   pp (x, t) = pp t ++ " " ++ x
@@ -987,12 +1163,25 @@ instance PP (String, Type) where
 instance PP JExp where
   pp (JOp "Just" [e] t) = pp e
   pp (JK "Nothing" t) = "null"
+  pp (JK "Nil" (TCon _ [base])) = "Collections.<" ++ pp base ++ ">emptyList()"
   pp (JNew es t) = "new " ++ pp t ++ "(" ++ intercalate ", " (map pp es) ++ ")"
   pp (JVar x t) = x
+  pp (JOp ":" es t) = "consList" ++ "(" ++ intercalate ", " (map pp es) ++ ")"
+  pp (JOp "++" es t) = "appendLists" ++ "(" ++ intercalate ", " (map pp es) ++ ")"
+  pp (JOp "toMaybe" [e] (TCon _ [base])) | isPrimitive base = "((" ++ pp (fromJust (boxedType base)) ++ ") " ++ pp e ++ ")"
+  pp (JOp "toMaybe" [e] (TCon _ [base])) = pp e
+  pp (JOp "unMaybe" [e] (TCon _ [base])) | isPrimitive base = "((" ++ pp base ++ ") " ++ pp e ++ ")"
+  pp (JOp "unMaybe" [e] (TCon _ [base])) = pp e
+  pp (JOp "maybeToList" [e] (TCon _ [base])) = "java.util.Collections.<" ++ pp base ++ ">singletonList(" ++ pp e ++ ")"
+  pp (JOp "listToArray" [e] (TCon _ [base])) = pp e ++ ".toArray(new " ++ pp base ++ "[0])"
+  pp (JOp "arrayToList" [e] (TCon _ [base])) = "java.util.Arrays<" ++ pp base ++ ">asList(" ++ pp e ++ ")"
+  pp (JOp "toArray2" [e1, e2] (TCon _ [base])) = "new " ++ pp base ++ "[] { " ++ pp e1 ++ ", " ++ pp e2 ++ "}"
+  pp (JOp "toList2" [e1, e2] (TCon _ [base])) = "java.util.Arrays.<" ++ pp base ++ ">asList(new " ++ pp base ++ "[] { " ++ pp e2 ++ ", " ++ pp e2 ++ " })"
   pp (JOp x es t) = x ++ "(" ++ intercalate ", " (map pp es) ++ ")"
   pp (JK k t) = k
 
 instance PP Type where
+  pp (TCon "Maybe" [t]) | isPrimitive t = pp (fromJust (boxedType t))
   pp (TCon "Maybe" [t]) = pp t
   pp (TCon "Array" [t]) = pp t ++ "[]"
   pp (TCon label []) = label

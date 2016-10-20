@@ -35,6 +35,12 @@ expandAliases :: [Aliases] -> Word -> [Word]
 expandAliases [] word = [word]
 expandAliases (aliases:aliasess) word = nub $ aliasesOf aliases word ++ expandAliases aliasess word
 
+
+chooseAlias :: [[String]] -> String -> String
+chooseAlias aliases word = maximum $ expandAliases aliases word
+
+
+
 breakNameIntoWords :: String -> [String]
 -- Break a name like PlusExp or Plus_Exp into words: [Plus, Exp]
 breakNameIntoWords "" = []
@@ -59,20 +65,21 @@ matchWordies aliases x y = do
   let xys = liftM2 (,) xs ys
   product $ map (uncurry (matchNameWithAliases aliases)) xys
 
--- Compute a cost between 0 and 1 for a string match
--- Exp -> Expression should cost 0
--- Statement -> Exp should cost 0.5 (for example)
--- Plus -> Times should cost 1
+-- TODO: a single word might expand to multiple words
 matchNameWithAliases :: [[String]] -> String -> String -> Double
 matchNameWithAliases aliases x y =
-    product costs
+    1 - index
   where
     xs = map (map toLower) $ breakNameIntoWords x
     ys = map (map toLower) $ breakNameIntoWords y
-    xass = map (nub . expandAliases aliases) xs
-    yass = map (nub . expandAliases aliases) ys
-    xyass = liftM2 (,) xass yass
-    sd a b = (a `Set.difference` b) `Set.union` (b `Set.difference` a)
-    cost xas yas = size (Set.fromList xas `sd` Set.fromList yas) / size (Set.fromList xas `Set.union` Set.fromList yas)
-    size s = fromIntegral (Set.size s)
-    costs = map (uncurry cost) xyass
+
+    -- replace each word with a representative alias
+    repXs = map (chooseAlias aliases) xs
+    repYs = map (chooseAlias aliases) ys
+
+    -- return the Jaccard index (size of the intersection / size of the union)
+    xset = Set.fromList repXs
+    yset = Set.fromList repYs
+
+    -- Jaccard index
+    index = fromIntegral (Set.size (xset `Set.intersection` yset)) / fromIntegral (Set.size (xset `Set.union` yset))
