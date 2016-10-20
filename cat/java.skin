@@ -140,7 +140,6 @@ data TYPE = BooleanType
 data DIMENSIONS = Zero | Succ DIMENSIONS
 
 data NAME = Name (Maybe NAME) IDENTIFIER
-          | NameFromList [IDENTIFIER]
 
 data IDENTIFIER = Identifier String
 
@@ -230,6 +229,7 @@ template STATEMENT -> STATEMENT ::= statement:a { a };
 
 -- template Object -> [A] ::= "(" object_list:a ")" { a };
 
+-- TODO/FIXME: it would be nice if we could know when to add a ";" after new statements
 -- STATEMENT ::= ... ";" if last child not STATEMENT
 -- keyword at the beginning
 -- no nonterminals juxtaposed
@@ -303,20 +303,10 @@ NAME name    ::=
 NAME simple_name ::=
         ident:a
             { Name Nothing a }
-    |   ident:a
-            { NameFromList [a] }
     ;
 NAME qualified_name ::=
         name:a "." ident:b
             { Name (Just a) b }
-    |   ident:a "." ident_list:b
-            { NameFromList (a:b) }
-    ;
-[IDENTIFIER] ident_list ::=
-        ident:a
-            { [a] }
-    |   ident:a ident_list:b
-            { a : b }
     ;
 SOURCE compilation_unit ::=
         package_declaration_opt:a
