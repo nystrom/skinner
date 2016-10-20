@@ -214,17 +214,17 @@ token String STRING_LITERAL
 template TYPE -> TYPE ::= "<" type:a ">" { a };
 template TYPE -> [TYPE] ::= "<" types:a ">" { a };
 template TYPE -> EXPRESSION ::= "(" expression:a ")" { a };
-template TYPE -> [EXPRESSION] ::= "(" argument_list:a ")" { a };
+template TYPE -> [EXPRESSION] ::= "(" argument_list_opt:a ")" { a };
 
 template EXPRESSION -> TYPE ::= "<" type:a ">" { a };
 template EXPRESSION -> [TYPE] ::= "<" types:a ">" { a };
 template EXPRESSION -> EXPRESSION ::= expression:a { a };
-template EXPRESSION -> [EXPRESSION] ::= "(" argument_list:a ")" { a };
+template EXPRESSION -> [EXPRESSION] ::= "(" argument_list_opt:a ")" { a };
 
 template STATEMENT -> TYPE ::= "<" type:a ">" { a };
 template STATEMENT -> [TYPE] ::= "<" types:a ">" { a };
 template STATEMENT -> EXPRESSION ::= "(" expression:a ")" { a };
-template STATEMENT -> [EXPRESSION] ::= "(" argument_list:a ")" { a };
+template STATEMENT -> [EXPRESSION] ::= "(" argument_list_opt:a ")" { a };
 template STATEMENT -> [STATEMENT] ::= "{" block_statements:a "}" { a };
 template STATEMENT -> STATEMENT ::= statement:a { a };
 
