@@ -551,7 +551,7 @@ fixRules f rules = do
     else fixRules f rules'
 
 removeUnusedRules :: [MatchResult] -> [Rule] -> [Rule]
-removeUnusedRules matchResults = (fixRules (removeDeadRules)) . coveredRules
+removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUndefinedRHS . removeDeadRules)) . coveredRules
   where
     coveredRules = tracef "coveredRules" (findCoveredRules (mapMaybe getConstructor matchResults))
 
@@ -575,7 +575,7 @@ removeUnusedRules matchResults = (fixRules (removeDeadRules)) . coveredRules
       where
         ruleUsed = tracef "ruleUsed" ruleUsed2
 
-        ruleUsed2 (Rule _ lhs _ _) = any (ntUsed lhs) rules
+        ruleUsed2 (Rule _ lhs _ _) = lhs == "goal" || any (ntUsed lhs) rules
 
         ntUsed lhs (Rule _ _ rhs _) = any (ntUsed' lhs) rhs
 
@@ -585,15 +585,15 @@ removeUnusedRules matchResults = (fixRules (removeDeadRules)) . coveredRules
     -- filter all rules where all nonterminals on the RHS are defined
     removeRulesWithUndefinedRHS :: [Rule] -> [Rule]
     removeRulesWithUndefinedRHS rules | trace ("removeRulesWithUndefinedRHS " ++ show rules) False = undefined
-    removeRulesWithUndefinedRHS rules = filter ruleUsed rules
+    removeRulesWithUndefinedRHS rules = filter ruleDefined rules
       where
-        ruleUsed = tracef "ruleUsed" ruleReallyUsed
+        ruleDefined = tracef "ruleDefined" ruleDefined2
 
-        ruleReallyUsed (Rule _ lhs rhs _) = all rhsUsed rhs
+        ruleDefined2 (Rule _ lhs rhs _) = all rhsDefined rhs
 
-        rhsUsed (Nonterminal x, _) = x `elem` map (\(Rule _ lhs _ _) -> lhs) rules
-        rhsUsed (Terminal x, _) = True
-        rhsUsed (Literal x, _) = True
+        rhsDefined (Nonterminal x, _) = x `elem` map (\(Rule _ lhs _ _) -> lhs) rules
+        rhsDefined (Terminal x, _) = True
+        rhsDefined (Literal x, _) = True
 
     findRulesFor :: String -> [Rule] -> [Rule]
     {-
@@ -822,7 +822,7 @@ generateRhs parent hierarchy e =
 makeKeyword :: String -> State Skin String
 makeKeyword s = do
   let k = map toLower s
-  modify (\skin -> skin { tokens = nub $ (k, TCon "void" []) : tokens skin })
+  modify (\skin -> skin { tokens = nub $ ("TOKEN" ++ k, TCon "String" []) : tokens skin })
   return k
 
 findSymbolForType :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
@@ -1029,7 +1029,7 @@ run skinFile astFile = do
     gbody = jbody jast,
     grules = rules reducedSkin,
     gfactories = mapMaybe matchToFactory matchResults,
-    gtokens = tokens reducedSkin ++ concatMap ruleTokens (rules reducedSkin)
+    gtokens = nub $ tokens reducedSkin ++ concatMap ruleTokens (rules reducedSkin)
   }
 
   putStrLn "grammar"
@@ -1070,7 +1070,7 @@ ppNonterminalDeclarations rules = nub $ map go rules
   where
     go (Rule t lhs rhs _) = "non terminal " ++ pp t ++ " " ++ lhs ++ ";"
 
-literalToToken s = "TOKEN_" ++ join (map go s)
+literalToToken s = "TOKEN" ++ join (map go s)
   where
     go '(' = "_LPAREN"
     go ')' = "_RPAREN"
@@ -1142,8 +1142,8 @@ instance PP Grammar where
 
 library :: [String]
 library =
-  ["<T> List<T> consList(T x, List<T> xs) { List<T> ys = new ArrayList<T>(); ys.add(x); ys.addAll(xs); return ys; }"
-  ,"<T> List<T> appendLists(List<T> xs, List<T> ys) { List<T> zs = new ArrayList<T>(); zs.addAll(xs); zs.addAll(ys); return zs; }"
+  ["    <T> List<T> consList(T x, List<T> xs) { List<T> ys = new ArrayList<T>(); ys.add(x); ys.addAll(xs); return ys; }"
+  ,"    <T> List<T> appendLists(List<T> xs, List<T> ys) { List<T> zs = new ArrayList<T>(); zs.addAll(xs); zs.addAll(ys); return zs; }"
   ]
 
 instance PP Rule where
