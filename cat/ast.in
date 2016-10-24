@@ -19,19 +19,19 @@ enum AssocOp { Plus, Times }
 
 new Program(decls)
 new Method(id, params, body)
-new BinExp(Minus, left, right)
-new BinExp(Divide, left, right)
-new BinExp(Remainder, left, right)
-new AssocExp(Plus, es)
-new AssocExp(Times, es)
+new BinExp(BinaryOp.Minus, left, right)
+new BinExp(BinaryOp.Divide, left, right)
+new BinExp(BinaryOp.Remainder, left, right)
+new AssocExp(AssocOp.Plus, es)
+new AssocExp(AssocOp.Times, es)
 new Value(value)
 new If(cond, then, else)
 new Var(name)
 
 %header
 
+// header goes here
+
 %body
 
-Position position(String file, int line, int column, int offset) {
-  return new Position(file, line, column, offset);
-}
+    // body goes here

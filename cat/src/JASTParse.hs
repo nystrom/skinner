@@ -142,7 +142,10 @@ lexer = P.makeTokenParser
   { P.reservedNames = ["abstract", "class", "extends", "enum", "%header", "%body", "new"],
     P.reservedOpNames = ["[", "]", ";", "{", "}", "(", ")", "<", ">", "%"] })
 
-name = P.identifier lexer
+name = do
+  x <- P.identifier lexer
+  option x (do { punct "."; y <- name; return (x ++ "." ++ y) })
+
 reserved = P.reserved lexer
 punct = P.reservedOp lexer
 stringLiteral = P.stringLiteral lexer

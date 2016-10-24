@@ -267,7 +267,7 @@ typeCheckJAST jast = do
     return (label, funType' (map snd children) super)
 
   bindings <- forM (jenums jast) $ \(JEnum label t) ->
-    return (label, t)
+    return (show t ++ "." ++ label, t)
 
   let env = addBindings $ typeBindings ++ bindings
   let jexps' = map (runTC subtypeHierarchy . local env . typeCheckCtor (jconstructors jast)) (jexps jast)
