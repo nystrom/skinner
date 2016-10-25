@@ -1,0 +1,37 @@
+#!/usr/bin/python
+
+import re
+import sys
+import os
+
+tokens = {}
+keywords = []
+
+cup = open("out.cup", "r")
+for line in cup.readlines():
+  mo = re.match(r'^terminal.*\sTOKEN([^_]\w*);', line)
+  if mo:
+    keywords.append(mo.group(1))
+  mo = re.match(r'^terminal.*\s(TOKEN\w+);', line)
+  if mo:
+    tokens[mo.group(1)] = True
+cup.close()
+
+lex = open("java.flex", "r")
+for line in lex.readlines():
+  mo = re.match(r'.*void\s+init_keywords.*', line)
+  if mo:
+    print line,
+    for k in keywords:
+      print '        keywords.put("%s", sym.TOKEN%s);' % (k, k)
+  else:
+    mo = re.match(r'.*return\s+op\(sym\.(\w+).*', line)
+    if mo and not tokens.has_key(mo.group(1)):
+      pass
+    else:
+      mo = re.match(r'.*keywords\.put\(.*,\s+sym\.(\w+).*', line)
+      if mo:
+        pass
+      else:
+        print line,
+lex.close()
