@@ -38,6 +38,7 @@ skinner/lex/Token.class:
 slowtest:
 	rm -f out.cup
 	make all
+	make test
 
 test:
 	java -cp java_cup.jar:jflex.jar:. TestJava test.java-skinned
