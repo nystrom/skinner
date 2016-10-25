@@ -1,0 +1,11 @@
+method add(x, y) {
+  return x+y;
+}
+
+method sub(x, y) {
+  return x - y;
+}
+
+method saxpy(a, x, y) {
+  return a * x + y;
+}
