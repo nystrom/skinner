@@ -7,7 +7,10 @@ import os
 tokens = {}
 keywords = []
 
-cup = open("out.cup", "r")
+cup_file = sys.argv[1]
+lex_file = sys.argv[2]
+
+cup = open(cup_file, "r")
 for line in cup.readlines():
   mo = re.match(r'^terminal.*\sTOKEN([^_]\w*);', line)
   if mo:
@@ -17,7 +20,7 @@ for line in cup.readlines():
     tokens[mo.group(1)] = True
 cup.close()
 
-lex = open("java.flex", "r")
+lex = open(lex_file, "r")
 for line in lex.readlines():
   mo = re.match(r'.*void\s+init_keywords.*', line)
   if mo:
