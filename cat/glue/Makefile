@@ -10,7 +10,7 @@ all:
 	make TestJava.class
 
 out.cup:
-	(cd ..; make java) | awk '/grammar/ { p = 1; next; } /<<grammar/ { p = 0 } { if (p) print }' > out.cup
+	(cd ..; cabal run cat glue/java.skin glue/ast.in) | awk '/grammar/ { p = 1; next; } /<<grammar/ { p = 0 } { if (p) print }' > out.cup
 
 Parser.class: Parser.java
 	javac -cp java_cup.jar:jflex.jar:. Parser.java
