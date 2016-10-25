@@ -57,11 +57,12 @@ alias actual argument
 alias formal formal_parameter
 alias if if_then if_then_else cond conditional
 alias cond conditional
-alias declaration decl definition def
+alias declaration decl definition def statement
 
 ast
 
 data PROGRAM = Program [STATEMENT]
+             | Program2 [DECLARATION]
 
 data NAME = GlobalName String
         | TopLevelName String
@@ -69,7 +70,7 @@ data NAME = GlobalName String
         | AtName String
 
 data STATEMENT = DoBlock EXPRESSION [EXPRESSION] STATEMENT
-         | Block STATEMENT [EXPRESSION]
+         | Block [STATEMENT]
          | Undef NAME
          | Alias NAME NAME
          | BEGIN STATEMENT
@@ -162,16 +163,15 @@ data EXPRESSION =
 
          -- literal
          | NumberLit a
+         | IntLit a
          | Symbol a
          | StringLit a
          | Regexp a
-         | GlobalName a
 
 data DECLARATION = 
            Class NAME (Maybe NAME) STATEMENT
          | Module NAME STATEMENT
          | Function EXPRESSION [NAME] STATEMENT
-
 
 data WHEN = When [EXPRESSION] STATEMENT
 
@@ -181,6 +181,7 @@ data RESCUE = Rescue [EXPRESSION] STATEMENT
 
 token String IDENTIFIER
 token double NUMBER
+token int INTEGER
 token String SYMBOL
 token String STRING
 token String STRING2
@@ -212,7 +213,7 @@ program       ::= compound_statement:a                                          
                 ;
 
 STATEMENT
-compound_statement      ::= statement:a term_expr_list:b term_opt                               { Block a b }
+compound_statement      ::= statement:a term_expr_list:b term_opt                               { Block (a:b) }
                 ;
 
 void
@@ -220,8 +221,8 @@ term_opt      ::= TERM                                  { () }
                 | {- empty -}                           { () }
                 ;
 
-[EXPRESSION]
-term_expr_list ::= expression:a TERM term_expr_list:b          { a:b }
+[STATEMENT]
+term_expr_list ::= statement:a TERM term_expr_list:b          { a:b }
                 | TERM  { [] }
                 ;
 
@@ -569,6 +570,7 @@ variable      ::= var_name:a                                     { NameExp a }
 
 EXPRESSION
 literal       ::= NUMBER:a                                      { NumberLit a }
+                | INTEGER:a                                     { IntLit a }
                 | STRING:a                                      { StringLit a }
                 | STRING2:a                                     { StringLit a }
                 | HERE_DOC:a                                    { StringLit a }
