@@ -87,9 +87,11 @@ isBuiltin (TCon "java.lang.Float" [])     = True
 isBuiltin (TCon "java.lang.Double" [])    = True
 isBuiltin (TCon "java.lang.Boolean" [])   = True
 isBuiltin (TCon "java.lang.Void" [])      = True
+isBuiltin (TCon "Maybe" [t])              = isBuiltin t
 isBuiltin (TCon "Array" [t])              = isBuiltin t
 isBuiltin (TCon "List" [t])               = isBuiltin t
-isBuiltin (TCon "java.util.List" [t])     = isBuiltin t
+isBuiltin (TCon "(,)" [t1,t2])            = isBuiltin t1 && isBuiltin t2
+isBuiltin (TCon "(,,)" [t1,t2,t3])        = isBuiltin t1 && isBuiltin t2 && isBuiltin t3
 isBuiltin t                               = isPrimitive t
 
 boxedType :: Type -> Maybe Type
@@ -380,8 +382,11 @@ matchTypes skin jast = do
 -- Is the skin type used for this particular substitution
 typeUsed :: Subst -> Type -> Bool
 typeUsed s t                  | isBuiltin t = True
+typeUsed s (TCon "Array" [t])  = typeUsed s t
 typeUsed s (TCon "List" [t])  = typeUsed s t
 typeUsed s (TCon "Maybe" [t]) = typeUsed s t
+typeUsed s (TCon "(,)" [t1,t2]) = typeUsed s t1 && typeUsed s t2
+typeUsed s (TCon "(,,)" [t1,t2,t3]) = typeUsed s t1 && typeUsed s t2 && typeUsed s t3
 typeUsed s (TCon label [])    = isJust (lookup (Tyvar label) s)
 typeUsed s t                  = False
 
@@ -574,7 +579,7 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
 
     -- filter all rules where the LHS is used in some other rule
     removeDeadRules :: [Rule] -> [Rule]
-    -- removeDeadRules rules | trace ("removeDeadRules " ++ show rules) False = undefined
+    removeDeadRules rules | trace ("removeDeadRules " ++ show rules) False = undefined
     removeDeadRules rules = filter ruleUsed rules
       where
         ruleUsed (Rule _ lhs _ _) = lhs == "goal" || any (ntUsed lhs) rules
@@ -586,7 +591,7 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
 
     -- filter all rules where all nonterminals on the RHS are defined
     removeRulesWithUndefinedRHS :: [Rule] -> [Rule]
-    -- removeRulesWithUndefinedRHS rules | trace ("removeRulesWithUndefinedRHS " ++ show rules) False = undefined
+    removeRulesWithUndefinedRHS rules | trace ("removeRulesWithUndefinedRHS " ++ show rules) False = undefined
     removeRulesWithUndefinedRHS rules = filter ruleDefined rules
       where
         ruleDefined (Rule _ lhs rhs _) = all rhsDefined rhs
@@ -596,10 +601,6 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
         rhsDefined (Literal x, _) = True
 
     findRulesFor :: String -> [Rule] -> [Rule]
-    {-
-    findRulesFor lhs rules = (tracef ("find(" ++ lhs ++ " in " ++ show rules ++ ")")
-                (findRulesFor2 lhs)) rules
-                -}
     findRulesFor lhs = filter (\(Rule _ x _ _) -> lhs == x)
 
     reachable :: [Rule] -> [Rule] -> [Rule]
@@ -639,6 +640,8 @@ findCoveredRules ks = filter ruleInvokesOnlyTheseConstructors
     typeMatchesTheseConstructors (TCon "List" [t]) = typeMatchesTheseConstructors t
     typeMatchesTheseConstructors (TCon "Maybe" [t]) = typeMatchesTheseConstructors t
     typeMatchesTheseConstructors (TCon "Array" [t]) = typeMatchesTheseConstructors t
+    typeMatchesTheseConstructors (TCon "(,)" ts) = all typeMatchesTheseConstructors ts
+    typeMatchesTheseConstructors (TCon "(,,)" ts) = all typeMatchesTheseConstructors ts
     typeMatchesTheseConstructors (TCon label []) = any (\(JConstructor label' _ _) -> label == label') ks
 
 data MatchResult = Match Cost JConstructor JExp
@@ -833,7 +836,9 @@ generateRhs parent hierarchy e =
 makeKeyword :: String -> State Skin String
 makeKeyword s = do
   let k = map toLower s
-  modify (\skin -> skin { tokens = nub $ ("TOKEN" ++ k, TCon "String" []) : tokens skin })
+  -- don't add the keyword to the tokens list... if we do, findSymbolForType might find it :-)
+  -- the pretty printer handles it correctly already
+  -- modify (\skin -> skin { tokens = tokens skin ++ [("TOKEN" ++ k, TCon "String" [])] })
   return k
 
 findSymbolForType :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
@@ -1058,7 +1063,6 @@ ruleTokens (Rule t lhs rhs e) = mapMaybe rhsToken rhs
     rhsToken (Literal a, _) = Just (literalToToken a, TCon "String" [])
     rhsToken _ = Nothing
 
-
 data Grammar = Grammar { gheader :: String, gbody :: String, grules :: [Rule], gfactories :: [JFactory], gtokens :: [(String, Type)] }
   deriving Show
 
@@ -1129,6 +1133,8 @@ instance PP Grammar where
                  ,""
                  ,"import java_cup.runtime.Symbol;"
                  ,"import skinner.util.Position;"
+                 ,"import skinner.util.Tuple2;"
+                 ,"import skinner.util.Tuple3;"
                  ,"import skinner.lex.*;"
                  ,"import java.util.List;"
                  ,"import java.util.ArrayList;"
@@ -1227,12 +1233,16 @@ instance PP JExp where
   pp (JOp x es t) = "parser." ++ x ++ "(" ++ intercalate ", " (map pp es) ++ ")"
   pp (JK k t) = k
 
+boxPrimitive t | isPrimitive t = fromJust (boxedType t)
+boxPrimitive t                 = t
+
 instance PP Type where
-  pp (TCon "Maybe" [t]) | isPrimitive t = pp (fromJust (boxedType t))
-  pp (TCon "Maybe" [t]) = pp t
+  pp (TCon "Maybe" [t]) = pp (boxPrimitive t)
   pp (TCon "Array" [t]) = pp t ++ "[]"
+  pp (TCon "(,)" ts) = pp (TCon "Tuple2" ts)
+  pp (TCon "(,,)" ts) = pp (TCon "Tuple3" ts)
   pp (TCon label []) = label
-  pp (TCon label ts) = label ++ "<" ++ intercalate ", " (map pp ts) ++ ">"
+  pp (TCon label ts) = label ++ "<" ++ intercalate ", " (map (pp . boxPrimitive) ts) ++ ">"
   pp (TVar (Tyvar v)) = v
 
 instance PP (JConstructor, JExp) where

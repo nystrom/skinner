@@ -137,10 +137,12 @@ application = try $ do
     x -> return $ JVar x TBoh
 
 primary :: Parser JExp
-primary = try (variable <|> list expressions <|> tuple expressions)
+primary = try (variable <|> list expressions <|> tuple expressions <|> number)
 
-number :: Parser Int
-number = read <$> many1 digit <* ws
+number :: Parser JExp
+number = do
+  s <- many1 digit <* ws
+  return $ JK s TBoh
 
 expressions :: Parser [JExp]
 expressions = try $ expression `sepBy` punct ","

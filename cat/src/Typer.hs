@@ -158,6 +158,10 @@ typeCheck (JOp ":" [e1, e2] _) = do
   unifySubtype (typeof e1') (TVar a)
   unifySubtype (typeof e2') (TCon "List" [TVar a])
   return (JOp ":" [e1', e2'] (TCon "List" [TVar a]))
+typeCheck (JK "0" _) = do
+  return $ JK "0" (TCon "int" [])
+typeCheck (JK "1" _) = do
+  return $ JK "1" (TCon "int" [])
 typeCheck (JK "Nil" _) = do
   a <- freshTyvar
   return $ JK "Nil" (TCon "List" [TVar a])
