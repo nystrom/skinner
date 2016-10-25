@@ -547,7 +547,7 @@ substSkin s skin = skin { interfaces = mapMaybe (fmap substInterface . fixInterf
 -- Repeat...
 
 fixRules :: ([Rule] -> [Rule]) -> [Rule] -> [Rule]
-fixRules f rules | trace ("fix " ++ show rules) False = undefined
+-- fixRules f rules | trace ("fix " ++ show rules) False = undefined
 fixRules f rules = do
   let rules' = f rules
   if rules == rules'
@@ -557,9 +557,9 @@ fixRules f rules = do
 removeUnusedRules :: [MatchResult] -> [Rule] -> [Rule]
 removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUndefinedRHS . removeDeadRules)) . coveredRules
   where
-    coveredRules = tracef "coveredRules" (findCoveredRules (mapMaybe getConstructor matchResults))
+    coveredRules = findCoveredRules (mapMaybe getConstructor matchResults)
 
-    reachableRules = tracef "reachableRules" (\rules -> reachable rules (startRules rules))
+    reachableRules rules = reachable rules (startRules rules)
 
     startRules rules = case goal rules of
       Nothing -> []
@@ -574,12 +574,10 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
 
     -- filter all rules where the LHS is used in some other rule
     removeDeadRules :: [Rule] -> [Rule]
-    removeDeadRules rules | trace ("removeDeadRules " ++ show rules) False = undefined
+    -- removeDeadRules rules | trace ("removeDeadRules " ++ show rules) False = undefined
     removeDeadRules rules = filter ruleUsed rules
       where
-        ruleUsed = tracef "ruleUsed" ruleUsed2
-
-        ruleUsed2 (Rule _ lhs _ _) = lhs == "goal" || any (ntUsed lhs) rules
+        ruleUsed (Rule _ lhs _ _) = lhs == "goal" || any (ntUsed lhs) rules
 
         ntUsed lhs (Rule _ _ rhs _) = any (ntUsed' lhs) rhs
 
@@ -588,12 +586,10 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
 
     -- filter all rules where all nonterminals on the RHS are defined
     removeRulesWithUndefinedRHS :: [Rule] -> [Rule]
-    removeRulesWithUndefinedRHS rules | trace ("removeRulesWithUndefinedRHS " ++ show rules) False = undefined
+    -- removeRulesWithUndefinedRHS rules | trace ("removeRulesWithUndefinedRHS " ++ show rules) False = undefined
     removeRulesWithUndefinedRHS rules = filter ruleDefined rules
       where
-        ruleDefined = tracef "ruleDefined" ruleDefined2
-
-        ruleDefined2 (Rule _ lhs rhs _) = all rhsDefined rhs
+        ruleDefined (Rule _ lhs rhs _) = all rhsDefined rhs
 
         rhsDefined (Nonterminal x, _) = x `elem` map (\(Rule _ lhs _ _) -> lhs) rules
         rhsDefined (Terminal x, _) = True
@@ -610,7 +606,7 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
     reachable allRules rules = (fixRules (\rules -> nub (moreRules rules))) rules
       where
         moreRules :: [Rule] -> [Rule]
-        moreRules rules = concatMap (`findRulesFor` allRules) ((tracef "nt" nonterminals) rules)
+        moreRules rules = concatMap (`findRulesFor` allRules) (nonterminals rules)
 
         nonterminals :: [Rule] -> [String]
         nonterminals rules = nub $ concatMap nonterminalsInRule rules
@@ -802,10 +798,21 @@ data Variance = Covariant | Contravariant
   -- I think to make this work nicely, we need to loosen the types of the skin grammar
   -- to allow arbitrary declarations at any level.
 
+findTemplates :: SubtypeEnv -> Type -> Type -> State Skin [Template]
+findTemplates _ t u | trace ("findTemplate " ++ show t) False = undefined
+findTemplates hierarchy t u = do
+  tms <- gets templates
+  case filter (\(Template parentType childType rhs action) -> parentType == t && childType == u) tms of
+    [] -> case supertype hierarchy t of
+            Just super -> findTemplates hierarchy super u
+            Nothing    -> return []
+    tms -> return tms
+
+
 -- Generate the RHS of a rule given the expression.
 -- TODO: add parent type for generating template
 generateRhs :: Maybe Type -> SubtypeEnv -> JExp -> State Skin [(Sym, String)]
-generateRhs _ _ e | trace ("generateRhs for " ++ show e) False = undefined
+generateRhs parent _ e | trace ("generateRhs for " ++ show e ++ " with parent " ++ show parent) False = undefined
 generateRhs parent hierarchy (JNew es (TCon label [])) = do
   k <- makeKeyword label
   rhs <- mapM (generateRhs parent hierarchy) es
@@ -830,8 +837,24 @@ makeKeyword s = do
   return k
 
 findSymbolForType :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
-findSymbolForType _ _ _ t | trace ("findSymbolForType for " ++ show t) False = undefined
+findSymbolForType parent _ _ t | trace ("findSymbolForType for " ++ show t ++ " parent=" ++ show parent) False = undefined
 findSymbolForType parent variance hierarchy t = do
+  case parent of
+    Just u -> do
+      tms <- findTemplates hierarchy u t
+      case tms of
+        (Template _ _ rhs action:_) -> do
+          n <- gets (length . rules) -- use the length of the rules list as a UID generator
+          let name = (map toLower (show t)) ++ "_" ++ show n
+          let rule = Rule t name rhs action
+          addRule rule
+          return $ Nonterminal name
+        _ -> addRuleForType parent variance hierarchy t
+    Nothing -> addRuleForType parent variance hierarchy t
+
+addRuleForType :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
+addRuleForType parent variance hierarchy t | trace ("addRule parent=" ++ show parent ++ " t=" ++ show t) False = undefined
+addRuleForType parent variance hierarchy t = do
   rs <- gets rules
   ts <- gets tokens
   as <- gets aliases
@@ -847,23 +870,8 @@ findSymbolForType parent variance hierarchy t = do
       return $ Nonterminal lhs
     [] -> case token of
       Just token -> return $ Terminal token
-      Nothing    -> addRuleForType parent variance hierarchy t
+      Nothing    -> createRuleForType parent variance hierarchy t
 
-addRuleForType :: Maybe Type -> Variance -> SubtypeEnv -> Type -> State Skin Sym
-addRuleForType parent variance hierarchy t = do
-  templateMatches <- case parent of
-    Nothing -> return []
-    Just u -> do
-      tms <- gets templates
-      return $ filter (\(Template parentType childType rhs action) -> u == parentType && t == childType) tms
-  case templateMatches of
-    [Template _ _ rhs action] -> do
-      let name = show t
-      let rule = Rule t name rhs action
-      addRule rule
-      return $ Nonterminal name
-    _ ->
-      createRuleForType parent variance hierarchy t
 
 -- add new rules at the end -- this preserves the invariant that the start rule is first
 addRule :: Rule -> State Skin ()
