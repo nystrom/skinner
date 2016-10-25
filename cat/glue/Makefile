@@ -40,4 +40,4 @@ slowtest:
 	make all
 
 test:
-	java -cp java_cup.jar:jflex.jar:. TestJava foo.java
+	java -cp java_cup.jar:jflex.jar:. TestJava test.java-skinned
