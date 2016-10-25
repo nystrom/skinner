@@ -110,6 +110,9 @@ data EXPRESSION = IntLit int
         | CondAnd EXPRESSION EXPRESSION
         | CondOr EXPRESSION EXPRESSION
         | Conditional EXPRESSION EXPRESSION EXPRESSION
+
+        | AssignName IDENTIFIER EXPRESSION
+
         | Assign EXPRESSION EXPRESSION
         | MulAssign EXPRESSION EXPRESSION
         | DivAssign EXPRESSION EXPRESSION
@@ -122,8 +125,13 @@ data EXPRESSION = IntLit int
         | AndAssign EXPRESSION EXPRESSION
         | XorAssign EXPRESSION EXPRESSION
         | OrAssign EXPRESSION EXPRESSION
+
         | ArrayInit [EXPRESSION]
         | Var IDENTIFIER
+        | Seq EXPRESSION EXPRESSION
+        | WhileExp EXPRESSION EXPRESSION
+        | DoExp EXPRESSION EXPRESSION
+        | Skip
 
 data TYPE = BooleanType
         | ByteType
@@ -144,6 +152,11 @@ data NAME = Name (Maybe NAME) IDENTIFIER
 data IDENTIFIER = Identifier String
 
 data SOURCE = Source (Maybe PACKAGE) [IMPORT] [DECLARATION]
+                | ProgramDeclarations [DECLARATION]
+                | ProgramStatements [STATEMENT]
+                | ProgramStatement STATEMENT
+                | ProgramExpressions [EXPRESSION]
+                | ProgramExpression EXPRESSION
 
 data PACKAGE = Package NAME
 
@@ -318,7 +331,29 @@ SOURCE compilation_unit ::=
         import_declarations_opt:b
         declarations_opt:c
             { Source a b c }
+    |   declarations_opt:c
+            { ProgramDeclarations c }
+    |   block_statements:c
+            { ProgramStatements c }
+    |   block_statements:c
+            { ProgramStatement (Block c) }
+    |   statement_expressions:c
+            { ProgramExpressions c }
+    |   sequence_expression:c
+            { ProgramExpression c }
         ;
+EXPRESSION
+sequence_expression ::=
+        statement_expression:a sequence_expression:b { Seq a b }
+    |   statement_expression:a { a }
+    ;
+[EXPRESSION]
+statement_expressions ::=
+        statement_expression:a
+            { [a] }
+    |   statement_expression:a statement_expressions:as
+            { a : as }
+    ;
 (Maybe PACKAGE) package_declaration_opt ::=
         package_declaration:a
             { Just a }
@@ -561,12 +596,31 @@ DECLARATION constructor_declaration ::=
     |   ";"
             { Nothing }
     ;
+-- TODO: add the other statement forms here
+EXPRESSION statement_expression ::=
+        block_expression:a
+            { a }
+    |   empty_statement_expression:a
+            { a }
+    |   do_statement_expression:a
+            { a }
+    |   if_then_statement_expression:a
+            { a }
+    |   if_then_else_statement_expression:a
+            { a }
+    |   while_statement_expression:a
+            { a }
+    |   for_statement_expression:a
+            { a }
+    |   expression:a ";"
+            { a }
+    ;
 STATEMENT statement ::=
         block:a
             { a }
     |   empty_statement:a
             { a }
-    |   expression_statement:a
+    |   eval_statement:a
             { a }
     |   switch_statement:a
             { a }
@@ -602,10 +656,16 @@ STATEMENT constructor_body ::=
             { Block (a : b) }
     |   "{" explicit_constructor_invocation:a "}"
             { Block [a] }
+-- REDUNDANT
+    |   "{" explicit_constructor_invocation:a "}"
+            { a }
     |   "{" block_statements:a "}"
             { Block a }
     |   "{" "}"
             { Block [] }
+-- REDUNDANT
+    |   "{" "}"
+            { EmptyStm }
     ;
 STATEMENT explicit_constructor_invocation ::=
         "this" "(" argument_list_opt:b ")" ";"
@@ -647,6 +707,10 @@ EXPRESSION array_initializer ::=
     |   variable_initializer:a "," variable_initializers:b
             { a : b }
     ;
+EXPRESSION block_expression ::=
+        "{" sequence_expression:a "}" { a }
+    |   "{" "}" { Skip }
+    ;
 STATEMENT block ::=
         "{" block_statements_opt:a "}"
             { Block a }
@@ -680,6 +744,10 @@ STATEMENT local_variable_declaration ::=
     |   "final" type:a variable_declarators:b
             { LocalDecl [FinalModifier] a b }
     ;
+EXPRESSION empty_statement_expression ::=
+        ";"
+            { Skip }
+    ;
 STATEMENT empty_statement ::=
         ";"
             { EmptyStm }
@@ -688,13 +756,21 @@ STATEMENT labeled_statement ::=
         ident:a ":" statement:b
             { Labeled a b }
     ;
-STATEMENT expression_statement ::=
+STATEMENT eval_statement ::=
         expression:a ";"
             { EvalStm a }
+    ;
+EXPRESSION if_then_statement_expression ::=
+        "if" "(" expression:a ")" statement_expression:b
+            { Conditional a b Skip }
     ;
 STATEMENT if_then_statement ::=
         "if" "(" expression:a ")" statement:b
             { IfThen a b }
+    ;
+EXPRESSION if_then_else_statement_expression ::=
+        "if" "(" expression:a ")" statement_expression:b "else" statement_expression:c
+            { Conditional a b c }
     ;
 STATEMENT if_then_else_statement ::=
         "if" "(" expression:a ")" statement:b "else" statement:c
@@ -736,18 +812,29 @@ STATEMENT switch_label ::=
     |   "default" ":"
             { Case Nothing }
     ;
+EXPRESSION while_statement_expression ::=
+        "while" "(" expression:a ")" statement_expression:b
+            { WhileExp a b }
+    ;
 STATEMENT while_statement ::=
         "while" "(" expression:a ")" statement:b
             { While a b }
+    ;
+EXPRESSION do_statement_expression ::=
+        "do" statement_expression:a "while" "(" expression:b ")" ";"
+            { DoExp a b }
     ;
 STATEMENT do_statement ::=
         "do" statement:a "while" "(" expression:b ")" ";"
             { Do a b }
     ;
 STATEMENT for_statement ::=
-        "for" "(" for_init_opt:a ";" expression_opt:b ";"
-            for_update_opt:c ")" statement:d
+        "for" "(" for_init_opt:a ";" expression_opt:b ";" for_update_opt:c ")" statement:d
             { For a b c d }
+    ;
+EXPRESSION for_statement_expression ::=
+        "for" "(" expression_list:a ";" expression:b ";" expression_list:c ")" statement_expression:d
+            { Seq a (WhileExp b (Seq d c)) }
     ;
 [STATEMENT] for_init_opt ::=
             { [] }
@@ -755,7 +842,7 @@ STATEMENT for_statement ::=
             { a }
     ;
 [STATEMENT] for_init ::=
-        statement_expression_list:a
+        for_update:a
             { a }
     |   local_variable_declaration:a
             { [a] }
@@ -765,14 +852,16 @@ STATEMENT for_statement ::=
     |   for_update:a
             { a }
     ;
-[STATEMENT] for_update ::=
-        statement_expression_list:a
+EXPRESSION expression_list ::=
+        expression:a
             { a }
+    |   expression:a "," expression_list:b
+            { Seq a b }
     ;
-[STATEMENT] statement_expression_list ::=
+[STATEMENT] for_update ::=
         expression:a
             { [EvalStm a] }
-    |   expression:a "," statement_expression_list:b
+    |   expression:a "," for_update:b
             { (EvalStm a) : b }
     ;
 (Maybe IDENTIFIER) identifier_opt ::=
@@ -960,10 +1049,24 @@ EXPRESSION postfix_expression ::=
 EXPRESSION postincrement_expression ::=
         postfix_expression:a "++"
             { PostIncrement a }
+-- REDUNDANT
+    |   postfix_expression:a "++"
+            { AddAssign a (IntLit 1) }
+    |   postfix_expression:a "++"
+            { Assign a (Add a (IntLit 1)) }
+    |   ident:a "++"
+            { AssignName a (Add (Var a) (IntLit 1)) }
     ;
 EXPRESSION postdecrement_expression ::=
         postfix_expression:a "--"
             { PostDecrement a }
+-- REDUNDANT
+    |   postfix_expression:a "--"
+            { SubAssign a (IntLit 1) }
+    |   postfix_expression:a "--"
+            { Assign a (Sub a (IntLit 1)) }
+    |   ident:a "--"
+            { AssignName a (Sub (Var a) (IntLit 1)) }
     ;
 EXPRESSION unary_expression ::=
         preincrement_expression:a
@@ -974,16 +1077,33 @@ EXPRESSION unary_expression ::=
             { UnaryPlus a }
     |   "-" unary_expression:a
             { UnaryMinus a }
+-- REDUNDANT
+    |   "-" unary_expression:a
+            { Sub (IntLit 0) a }
     |   unary_expression_not_plus_minus:a
             { a }
     ;
 EXPRESSION preincrement_expression ::=
         "++" unary_expression:a
             { PreIncrement a }
+-- REDUNDANT
+    |   "++" unary_expression:a
+            { AddAssign a (IntLit 1) }
+    |   "++" unary_expression:a
+            { Assign a (Add a (IntLit 1)) }
+    |   "++" ident:a
+            { AssignName a (Add (Var a) (IntLit 1)) }
     ;
 EXPRESSION predecrement_expression ::=
         "--" unary_expression:a
             { PreDecrement a }
+-- REDUNDANT
+    |   "--" unary_expression:a
+            { SubAssign a (IntLit 1) }
+    |   "--" unary_expression:a
+            { Assign a (Sub a (IntLit 1)) }
+    |   "--" ident:a
+            { AssignName a (Sub (Var a) (IntLit 1)) }
     ;
 EXPRESSION unary_expression_not_plus_minus ::=
         postfix_expression:a
@@ -1116,6 +1236,56 @@ EXPRESSION assignment ::=
             { XorAssign a c }
     |   left_hand_side:a "|=" assignment_expression:c
             { OrAssign a c }
+
+-- REDUNDANT
+    |   ident:a "=" assignment_expression:c
+            { AssignName a c }
+    |   ident:a "*=" assignment_expression:c
+            { AssignName a (Mul (Var a) c) }
+    |   ident:a "/=" assignment_expression:c
+            { AssignName a (Div (Var a) c) }
+    |   ident:a "%=" assignment_expression:c
+            { AssignName a (Mod (Var a) c) }
+    |   ident:a "+=" assignment_expression:c
+            { AssignName a (Add (Var a) c) }
+    |   ident:a "-=" assignment_expression:c
+            { AssignName a (Sub (Var a) c) }
+    |   ident:a "<<=" assignment_expression:c
+            { AssignName a (Shl (Var a) c) }
+    |   ident:a ">>=" assignment_expression:c
+            { AssignName a (Shr (Var a) c) }
+    |   ident:a ">>>=" assignment_expression:c
+            { AssignName a (UShr (Var a) c) }
+    |   ident:a "&=" assignment_expression:c
+            { AssignName a (BitAnd (Var a) c) }
+    |   ident:a "^=" assignment_expression:c
+            { AssignName a (BitXor (Var a) c) }
+    |   ident:a "|=" assignment_expression:c
+            { AssignName a (BitOr (Var a) c) }
+
+    |   left_hand_side:a "*=" assignment_expression:c
+            { Assign a (Mul a c) }
+    |   left_hand_side:a "/=" assignment_expression:c
+            { Assign a (Div a c) }
+    |   left_hand_side:a "%=" assignment_expression:c
+            { Assign a (Mod a c) }
+    |   left_hand_side:a "+=" assignment_expression:c
+            { Assign a (Add a c) }
+    |   left_hand_side:a "-=" assignment_expression:c
+            { Assign a (Sub a c) }
+    |   left_hand_side:a "<<=" assignment_expression:c
+            { Assign a (Shl a c) }
+    |   left_hand_side:a ">>=" assignment_expression:c
+            { Assign a (Shr a c) }
+    |   left_hand_side:a ">>>=" assignment_expression:c
+            { Assign a (UShr a c) }
+    |   left_hand_side:a "&=" assignment_expression:c
+            { Assign a (BitAnd a c) }
+    |   left_hand_side:a "^=" assignment_expression:c
+            { Assign a (BitXor a c) }
+    |   left_hand_side:a "|=" assignment_expression:c
+            { Assign a (BitOr a c) }
+
     ;
 EXPRESSION name_expr ::=
         ident:a
