@@ -1,0 +1,15 @@
+method add(x, y)
+  x+y
+end
+
+method sub(x, y)
+  x - y;
+end
+
+method saxpy(a, x, y)
+  a * x + y
+end
+
+method negate(x)
+  -x
+end
