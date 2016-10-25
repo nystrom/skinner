@@ -162,11 +162,11 @@ data EXPRESSION =
          | Declaration DECLARATION
 
          -- literal
-         | NumberLit a
-         | IntLit a
-         | Symbol a
-         | StringLit a
-         | Regexp a
+         | NumberLit double
+         | IntLit int
+         | Symbol String
+         | StringLit String
+         | Regexp String
 
 data DECLARATION = 
            Class NAME (Maybe NAME) STATEMENT
@@ -180,14 +180,10 @@ data RESCUE = Rescue [EXPRESSION] STATEMENT
 
 
 token String IDENTIFIER
-token double NUMBER
-token int INTEGER
-token String SYMBOL
-token String STRING
-token String STRING2
-token String HERE_DOC
-token String REGEXP
-token void TERM
+token double DOUBLE_LITERAL
+token int INTEGER_LITERAL
+token String STRING_LITERAL
+token String REGEXP_LITERAL
 
 template EXPRESSION -> EXPRESSION ::= expression:a { a };
 template EXPRESSION -> [EXPRESSION] ::= "(" call_arguments:a ")" { a };
@@ -195,6 +191,10 @@ template EXPRESSION -> [EXPRESSION] ::= "(" call_arguments:a ")" { a };
 template STATEMENT -> EXPRESSION ::= expression:a { a };
 template STATEMENT -> [EXPRESSION] ::= call_arguments:a { a };
 template STATEMENT -> STATEMENT ::= compound_statement:a { a };
+
+template DECLARATION -> EXPRESSION ::= expression:a { a };
+template DECLARATION -> [EXPRESSION] ::= call_arguments:a { a };
+template DECLARATION -> STATEMENT ::= compound_statement:a { a };
 
 -- template Object -> [A] ::= "(" object_list:a ")" { a };
 
@@ -210,6 +210,12 @@ goal          ::= program:a                                                     
 
 PROGRAM
 program       ::= compound_statement:a                                                          { Program [a] }
+                | declarations:a                                { Program2 a }
+                ;
+
+[DECLARATION]
+declarations  ::= declaration:a TERM declarations:as term_opt { a:as }
+                | { [] }
                 ;
 
 STATEMENT
@@ -447,12 +453,17 @@ primary       ::= "(" compound_statement:a ")"                                  
                 | "begin" compound_statement:a rescues:b "else" compound_statement:c "end"                          { Begin a (b ++ [c]) Nothing }
                 | "begin" compound_statement:a rescues:b "ensure" compound_statement:c "end"                        { Begin a b (Just c) }
                 | "begin" compound_statement:a rescues:b "else" compound_statement:c "ensure" compound_statement:d "end"      { Begin a (b ++ [c]) (Just d) }
-                | "class" identifier:a compound_statement:b "end"                 { Declaration (Class a Nothing b) }
-                | "class" identifier:a "<" identifier:s compound_statement:b "end"        { Declaration (Class a (Just s) b) }
-                | "module" identifier:a compound_statement:b "end"                { Declaration (Module a b) }
-                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { Declaration (Function (Var a) as b) }
-                | "def" singleton:a "." function_name:b argument_declaration:as compound_statement:c "end"     { Declaration (Function (Select a b) as c) }
-                | "def" singleton:a "::" function_name:b argument_declaration:as compound_statement:c "end"    { Declaration (Function (Select a b) as c) }
+                | declaration:a { Declaration a }
+                ;
+
+DECLARATION
+declaration ::=
+                  "class" identifier:a compound_statement:b "end"                 { (Class a Nothing b) }
+                | "class" identifier:a "<" identifier:s compound_statement:b "end"        { (Class a (Just s) b) }
+                | "module" identifier:a compound_statement:b "end"                { (Module a b) }
+                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { (Function (Var a) as b) }
+                | "def" singleton:a "." function_name:b argument_declaration:as compound_statement:c "end"     { (Function (Select a b) as c) }
+                | "def" singleton:a "::" function_name:b argument_declaration:as compound_statement:c "end"    { (Function (Select a b) as c) }
                 ;
 
 RESCUE
@@ -569,18 +580,17 @@ variable      ::= var_name:a                                     { NameExp a }
                 ;
 
 EXPRESSION
-literal       ::= NUMBER:a                                      { NumberLit a }
-                | INTEGER:a                                     { IntLit a }
-                | STRING:a                                      { StringLit a }
-                | STRING2:a                                     { StringLit a }
+literal       ::= DOUBLE_LITERAL:a                                      { NumberLit a }
+                | INTEGER_LITERAL:a                                     { IntLit a }
+                | STRING_LITERAL:a                                      { StringLit a }
                 | HERE_DOC:a                                    { StringLit a }
                 | REGEXP:a                                      { Regexp a }
                 | symbol:a                                      { a }
                 ;
 
+-- the scanner generates semicolons for terminator characters
 void
 TERM          ::= ";"           { () }
-                | NEWLINE           { () }
                 ;
 
 NAME
