@@ -19,4 +19,5 @@ public class IntegerLiteral extends Token<Integer> {
   public Integer getValue() {
     return val;
   }
+  public String toString() { return "integer " + val; }
 }

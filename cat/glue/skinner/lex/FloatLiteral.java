@@ -22,4 +22,5 @@ public class FloatLiteral extends Token<Float> {
   public Float getValue() {
     return val;
   }
+  public String toString() { return "float " + val; }
 }

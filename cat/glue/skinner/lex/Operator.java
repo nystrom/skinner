@@ -19,6 +19,7 @@ public class Operator extends Token<String> {
       this.which = which;
   }
 
-  public String toString() { return "operator " + which; }
+  public String toString() { return "operator '" + escape(which) + "' (" + symbol() + ")"; }
+
   public String getValue() { return which; }
 }

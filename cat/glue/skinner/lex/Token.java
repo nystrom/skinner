@@ -47,4 +47,8 @@ public abstract class Token<T> {
       }
     return sb.toString();
   }
+
+  public String toString() {
+    return getValue().toString();
+  }
 }

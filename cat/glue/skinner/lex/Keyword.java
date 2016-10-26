@@ -19,9 +19,7 @@ public class Keyword extends Token<String> {
       keyword = s;
   }
 
-  public String toString() {
-      return keyword;
-  }
+  public String toString() { return "keyword '" + keyword + "' (" + symbol() + ")"; }
 
   public String getValue() {
     return keyword;

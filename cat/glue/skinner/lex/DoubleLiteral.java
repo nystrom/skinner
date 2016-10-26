@@ -22,4 +22,5 @@ public class DoubleLiteral extends Token<Double> {
   public Double getValue() {
     return val;
   }
+  public String toString() { return "double " + val; }
 }

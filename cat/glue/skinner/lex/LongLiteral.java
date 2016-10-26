@@ -19,4 +19,5 @@ public class LongLiteral extends Token<Long> {
   public Long getValue() {
     return val;
   }
+  public String toString() { return "long " + val; }
 }
