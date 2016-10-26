@@ -1,5 +1,6 @@
 language Java
 
+alias skip unit void empty
 alias function func fun
 alias method meth function fun member_function
 alias member element
@@ -131,7 +132,8 @@ data EXPRESSION = IntLit int
         | Seq EXPRESSION EXPRESSION
         | WhileExp EXPRESSION EXPRESSION
         | DoExp EXPRESSION EXPRESSION
-        | Skip
+        | UnitLit
+        | Tuple [EXPRESSION]
 
 data TYPE = BooleanType
         | ByteType
@@ -709,7 +711,7 @@ EXPRESSION array_initializer ::=
     ;
 EXPRESSION block_expression ::=
         "{" sequence_expression:a "}" { a }
-    |   "{" "}" { Skip }
+    |   "{" "}" { UnitLit }
     ;
 STATEMENT block ::=
         "{" block_statements_opt:a "}"
@@ -746,7 +748,7 @@ STATEMENT local_variable_declaration ::=
     ;
 EXPRESSION empty_statement_expression ::=
         ";"
-            { Skip }
+            { UnitLit }
     ;
 STATEMENT empty_statement ::=
         ";"
@@ -762,7 +764,7 @@ STATEMENT eval_statement ::=
     ;
 EXPRESSION if_then_statement_expression ::=
         "if" "(" expression:a ")" statement_expression:b
-            { Conditional a b Skip }
+            { Conditional a b UnitLit }
     ;
 STATEMENT if_then_statement ::=
         "if" "(" expression:a ")" statement:b
@@ -831,6 +833,8 @@ STATEMENT do_statement ::=
 STATEMENT for_statement ::=
         "for" "(" for_init_opt:a ";" expression_opt:b ";" for_update_opt:c ")" statement:d
             { For a b c d }
+    -- |   "for" "(" for_init_opt:a ";" expression_opt:b ";" for_update_opt:c ")" statement:d
+            -- { Block (a:(While b (Block [d,c]))) }
     ;
 EXPRESSION for_statement_expression ::=
         "for" "(" expression_list:a ";" expression:b ";" expression_list:c ")" statement_expression:d
@@ -951,6 +955,10 @@ EXPRESSION primary ::=
             { This (Just a) }
     |   "(" expression:a ")"
             { a }
+    |   "(" expression:a "," argument_list:b ")"
+            { Tuple (a:b) }
+    |   "(" ")"
+            { UnitLit }
     |   class_instance_creation_expression:a
             { a }
     |   field_access:a
@@ -1078,6 +1086,8 @@ EXPRESSION unary_expression ::=
     |   "-" unary_expression:a
             { UnaryMinus a }
 -- REDUNDANT
+    |   "+" unary_expression:a
+            { Add (IntLit 0) a }         -- use rather than just 'a' to force the AST to at least be of int type and rule out +true = true
     |   "-" unary_expression:a
             { Sub (IntLit 0) a }
     |   unary_expression_not_plus_minus:a
