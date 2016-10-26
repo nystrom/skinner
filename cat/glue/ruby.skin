@@ -224,6 +224,8 @@ program       ::= statements:a                                  { ProgramExpress
                 | statements_exp:a                              { ProgramExpression a }
                 | ";"                                           { ProgramExpression Skip }
                 |                                               { ProgramExpression Skip }
+                | ";"                                           { ProgramExpression (Block []) }
+                |                                               { ProgramExpression (Block []) }
                 ;
 
 [DECLARATION]
@@ -256,9 +258,14 @@ statement          ::=
                   expression:a                                                { a }
                 | expression:a "do" block_variable_opt:b compound_statement:c "end"     { CallWithBlock a b c }
                 | expression:a "if" argument:c                                   { If c a }
+                | expression:a "if" argument:c                                   { IfElse c a Skip }
+                | expression:a "if" argument:c                                   { IfElse c a (Block []) }
                 | expression:a "while" argument:c                                { While c a }
                 | expression:a "unless" argument:c                               { If (Not c) a }
+                | expression:a "unless" argument:c                               { IfElse c Skip a }
+                | expression:a "unless" argument:c                               { IfElse c (Block []) a }
                 | expression:a "until" argument:c                                { While (Not c) a }
+                | expression:a "until" argument:c                                { While (IfElse c (BooleanLit False) (BooleanLit True)) a }
                 | "BEGIN" "{" compound_statement:a "}"                            { BEGIN a }
                 | "END" "{" compound_statement:a "}"                              { END a }
                 | "return" call_arguments:a                                       { Return a }
@@ -267,10 +274,11 @@ statement          ::=
                 | "if" expression:a then compound_statement:b "end"                     { IfElse a b Skip }
                 | "if" expression:a then compound_statement:b else:c "end"              { IfElse a b c }
                 | "unless" expression:a then compound_statement:b "end"                 { If (Not a) b }
-                | "unless" expression:a then compound_statement:b "end"                 { IfElse (Not a) b Skip }
-                | "unless" expression:a then compound_statement:b "else" compound_statement:c "end"   { IfElse (Not a) b c }
+                | "unless" expression:a then compound_statement:b "end"                 { IfElse a Skip b }
+                | "unless" expression:a then compound_statement:b "else" compound_statement:c "end"   { IfElse a c b }
                 | "while" expression:a do compound_statement:b "end"                    { While a b }
                 | "until" expression:a do compound_statement:b "end"                    { While (Not a) b }
+                | "until" expression:a do compound_statement:b "end"                    { While (IfElse a (BooleanLit False) (BooleanLit True)) b }
                 | "case" compound_statement:a whens:b "end"                       { Case a b }
                 | "case" compound_statement:a whens:b "else" compound_statement:c "end"     { Case a (b ++ [c]) }
                 | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { For a b c }
@@ -368,11 +376,13 @@ range        ::= range:a ".." cond_or:b                                      { I
 
 EXPRESSION
 cond_or ::= cond_or:a "||" cond_and:b   { Or a b }
+        | cond_or:a "||" cond_and:b   { IfElse a (BooleanLit True) b }
         | cond_and:a  { a }
         ;
 
 EXPRESSION
 cond_and ::= cond_and:a "&&" equality:b   { And a b }
+        | cond_and:a "&&" equality:b   { IfElse a b (BooleanLit False) }
         | equality:a       { a }
         ;
 
@@ -438,6 +448,7 @@ unary
                 | "-" pow:a                                             { UnaryMinus a }
                 | "-" pow:a                                             { Sub (IntLit 0) a }
                 | "!" pow:a                                             { Not a }
+                | "!" pow:a                                             { IfElse a (BooleanLit False) (BooleanLit True) }
                 | "~" pow:a                                             { Complement a }
                 | pow:a { a }
                 ;
