@@ -42,7 +42,8 @@ test2-ruby: .FORCE
 	(cd test2-ruby; java -cp ../jflex.jar jflex.Main out.flex)
 	(cd test2-ruby; javac -cp ../java_cup.jar:../jflex.jar:..:. Parser.java Lexer.java sym.java)
 	(cd test2-ruby; javac -cp ../java_cup.jar:../jflex.jar:..:. Program.java TestJava.java)
-	(cd test2-ruby; java -cp ../java_cup.jar:../jflex.jar:..:. TestJava test.ruby-skinned)
+	(cd test2-ruby; java -cp ../java_cup.jar:../jflex.jar:..:. TestJava test1.ruby-skinned)
+	(cd test2-ruby; java -cp ../java_cup.jar:../jflex.jar:..:. TestJava test2.ruby-skinned)
 
 
 utils:

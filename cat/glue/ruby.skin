@@ -254,15 +254,15 @@ compound_statement      ::= ";" statements:a            { Block a }
 EXPRESSION
 statement          ::=
                   expression:a                                                { a }
-                  -- expression:a "do" block_variable_opt:b compound_statement:c "end"     { CallWithBlock a b c }
-                -- | expression:a "if" argument:c                                   { If c a }
-                -- | expression:a "while" argument:c                                { While c a }
-                -- | expression:a "unless" argument:c                               { If (Not c) a }
-                -- | expression:a "until" argument:c                                { While (Not c) a }
-                -- | "BEGIN" "{" compound_statement:a "}"                            { BEGIN a }
-                -- | "END" "{" compound_statement:a "}"                              { END a }
-                -- | "return" call_arguments:a                                       { Return a }
-                -- | "yield" call_arguments:a                                        { Yield a }
+                | expression:a "do" block_variable_opt:b compound_statement:c "end"     { CallWithBlock a b c }
+                | expression:a "if" argument:c                                   { If c a }
+                | expression:a "while" argument:c                                { While c a }
+                | expression:a "unless" argument:c                               { If (Not c) a }
+                | expression:a "until" argument:c                                { While (Not c) a }
+                | "BEGIN" "{" compound_statement:a "}"                            { BEGIN a }
+                | "END" "{" compound_statement:a "}"                              { END a }
+                | "return" call_arguments:a                                       { Return a }
+                | "yield" call_arguments:a                                        { Yield a }
                 | "if" expression:a then compound_statement:b "end"                     { If a b }
                 | "if" expression:a then compound_statement:b "end"                     { IfElse a b Skip }
                 | "if" expression:a then compound_statement:b else:c "end"              { IfElse a b c }
@@ -271,15 +271,15 @@ statement          ::=
                 | "unless" expression:a then compound_statement:b "else" compound_statement:c "end"   { IfElse (Not a) b c }
                 | "while" expression:a do compound_statement:b "end"                    { While a b }
                 | "until" expression:a do compound_statement:b "end"                    { While (Not a) b }
-                -- | "case" compound_statement:a whens:b "end"                       { Case a b }
-                -- | "case" compound_statement:a whens:b "else" compound_statement:c "end"     { Case a (b ++ [c]) }
-                -- | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { For a b c }
-                -- | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { Foreach (In (Tuple a) b) c }
-                -- | "begin" compound_statement:a rescues:b "end"                                            { Begin a b Nothing }
-                -- | "begin" compound_statement:a rescues:b "else" compound_statement:c "end"                          { Begin a (b ++ [c]) Nothing }
-                -- | "begin" compound_statement:a rescues:b "ensure" compound_statement:c "end"                        { Begin a b (Just c) }
-                -- | "begin" compound_statement:a rescues:b "else" compound_statement:c "ensure" compound_statement:d "end"      { Begin a (b ++ [c]) (Just d) }
-                -- | declaration:a { Declaration a }
+                | "case" compound_statement:a whens:b "end"                       { Case a b }
+                | "case" compound_statement:a whens:b "else" compound_statement:c "end"     { Case a (b ++ [c]) }
+                | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { For a b c }
+                | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { Foreach (In (Tuple a) b) c }
+                | "begin" compound_statement:a rescues:b "end"                                            { Begin a b Nothing }
+                | "begin" compound_statement:a rescues:b "else" compound_statement:c "end"                          { Begin a (b ++ [c]) Nothing }
+                | "begin" compound_statement:a rescues:b "ensure" compound_statement:c "end"                        { Begin a b (Just c) }
+                | "begin" compound_statement:a rescues:b "else" compound_statement:c "ensure" compound_statement:d "end"      { Begin a (b ++ [c]) (Just d) }
+                | declaration:a { Declaration a }
                 ;
 
 EXPRESSION
