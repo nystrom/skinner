@@ -1,5 +1,8 @@
 language Ruby
 
+alias seq sequence
+alias skip empty void unit
+alias exponent power pow expt 
 alias function func fun
 alias method meth function fun member_function
 alias member element
@@ -61,144 +64,147 @@ alias declaration decl definition def statement
 
 ast
 
-data PROGRAM = Program [STATEMENT]
-             | Program2 [DECLARATION]
+data PROGRAM
+        = ProgramDeclarations [DECLARATION]
+        | ProgramExpressions [EXPRESSION]
+        | ProgramExpression EXPRESSION
 
-data NAME = GlobalName String
-        | TopLevelName String
-        | Identifier String
-        | AtName String
+data NAME
+        = Identifier String
 
-data STATEMENT = DoBlock EXPRESSION [EXPRESSION] STATEMENT
-         | Block [STATEMENT]
-         | Undef NAME
-         | Alias NAME NAME
-         | BEGIN STATEMENT
-         | END STATEMENT
-         | AssignStatement EXPRESSION EXPRESSION
-         | AssignWithBlock EXPRESSION EXPRESSION [EXPRESSION] STATEMENT
-         | ExpStatement EXPRESSION
+data EXPRESSION
+        = CallWithBlock EXPRESSION [EXPRESSION] EXPRESSION
+        | Block [EXPRESSION]
+        | BEGIN EXPRESSION
+        | END EXPRESSION
 
-data EXPRESSION =
-         StatementExp STATEMENT
+        | When [EXPRESSION] EXPRESSION
+        | Rescue [EXPRESSION] EXPRESSION
 
-         -- variables (which should be another type -- everything's an EXPRESSION!)
-         | Var NAME                     -- really just identifier and operation
-         | Select EXPRESSION NAME
-         | ModuleSelect EXPRESSION NAME
-         | Tuple [EXPRESSION]
-         | KeyValue EXPRESSION EXPRESSION
-         | NilLit
-         | TopLevelModule
-         | Self
+        | Return [EXPRESSION]
+        | Yield [EXPRESSION]
+        | FunBlock EXPRESSION [EXPRESSION] EXPRESSION
+        | If EXPRESSION EXPRESSION
+        | IfElse EXPRESSION EXPRESSION EXPRESSION
+        | While EXPRESSION EXPRESSION
+        | Case EXPRESSION [EXPRESSION]
+        | For [EXPRESSION] EXPRESSION EXPRESSION
+        | Foreach EXPRESSION EXPRESSION
+        | In EXPRESSION EXPRESSION
+        | Begin EXPRESSION [EXPRESSION] (Maybe EXPRESSION)
 
-         -- function
-         | Call EXPRESSION [EXPRESSION]
-         | Super
+        | Declaration DECLARATION
+
+        -- variables (which should be another type -- everything's an EXPRESSION!)
+        | Var String                     -- really just identifier and operation
+        | VarName NAME                     -- really just identifier and operation
+        | SelectName EXPRESSION NAME
+        | Select EXPRESSION String
+        | Tuple [EXPRESSION]
+        | KeyValue EXPRESSION EXPRESSION
+        | NilLit
+        | Self
+
+        | Skip
+        | Seq EXPRESSION EXPRESSION
+
+        | Defined EXPRESSION
+
+        -- function
+        | Call EXPRESSION [EXPRESSION]
+        | Super
 
         -- argument
-         | Assign EXPRESSION EXPRESSION
+        | Assign EXPRESSION EXPRESSION
+        | AssignName String EXPRESSION
 
-         | ModAssign EXPRESSION EXPRESSION
-         | DivAssign EXPRESSION EXPRESSION
-         | SubAssign EXPRESSION EXPRESSION
-         | AddAssign EXPRESSION EXPRESSION
-         | OrAssign EXPRESSION EXPRESSION
-         | XorAssign EXPRESSION EXPRESSION
-         | AndAssign EXPRESSION EXPRESSION
-         | RightShiftAssign EXPRESSION EXPRESSION
-         | LeftShiftAssign EXPRESSION EXPRESSION
-         | MulAssign EXPRESSION EXPRESSION
-         | CondAndAssign EXPRESSION EXPRESSION
-         | CondOrAssign EXPRESSION EXPRESSION
-         | ExponentAssign EXPRESSION EXPRESSION
+        | ModAssign EXPRESSION EXPRESSION
+        | DivAssign EXPRESSION EXPRESSION
+        | SubAssign EXPRESSION EXPRESSION
+        | AddAssign EXPRESSION EXPRESSION
+        | OrAssign EXPRESSION EXPRESSION
+        | XorAssign EXPRESSION EXPRESSION
+        | AndAssign EXPRESSION EXPRESSION
+        | RightShiftAssign EXPRESSION EXPRESSION
+        | LeftShiftAssign EXPRESSION EXPRESSION
+        | MulAssign EXPRESSION EXPRESSION
+        | CondAndAssign EXPRESSION EXPRESSION
+        | CondOrAssign EXPRESSION EXPRESSION
+        | ExponentAssign EXPRESSION EXPRESSION
 
-         | InclusiveRange EXPRESSION EXPRESSION
-         | ExclusiveRange EXPRESSION EXPRESSION
-         | Add EXPRESSION EXPRESSION
-         | Sub EXPRESSION EXPRESSION
-         | Mul EXPRESSION EXPRESSION
-         | Div EXPRESSION EXPRESSION
-         | Mod EXPRESSION EXPRESSION
-         | Exponent EXPRESSION EXPRESSION
-         | UnaryPlus EXPRESSION
-         | UnaryMinus EXPRESSION
-         | BitOr EXPRESSION EXPRESSION
-         | BitXor EXPRESSION EXPRESSION
-         | BitAnd EXPRESSION EXPRESSION
-         | Iff EXPRESSION EXPRESSION
-         | Greater EXPRESSION EXPRESSION
-         | GreaterEqual EXPRESSION EXPRESSION
-         | Less EXPRESSION EXPRESSION
-         | LessEqual EXPRESSION EXPRESSION
-         | Equal EXPRESSION EXPRESSION
-         | StrictEqual EXPRESSION EXPRESSION
-         | NotEqual EXPRESSION EXPRESSION
-         | Matches EXPRESSION EXPRESSION
-         | NotMatches EXPRESSION EXPRESSION
-         | Not EXPRESSION
-         | Complement EXPRESSION
-         | LeftShift EXPRESSION EXPRESSION
-         | RightShift EXPRESSION EXPRESSION
-         | And EXPRESSION EXPRESSION
-         | Or EXPRESSION EXPRESSION
+        | InclusiveRange EXPRESSION EXPRESSION
+        | ExclusiveRange EXPRESSION EXPRESSION
+        | Add EXPRESSION EXPRESSION
+        | Sub EXPRESSION EXPRESSION
+        | Mul EXPRESSION EXPRESSION
+        | Div EXPRESSION EXPRESSION
+        | Mod EXPRESSION EXPRESSION
+        | Exponent EXPRESSION EXPRESSION
+        | UnaryPlus EXPRESSION
+        | UnaryMinus EXPRESSION
+        | BitOr EXPRESSION EXPRESSION
+        | BitXor EXPRESSION EXPRESSION
+        | BitAnd EXPRESSION EXPRESSION
+        | Iff EXPRESSION EXPRESSION
+        | Greater EXPRESSION EXPRESSION
+        | GreaterEqual EXPRESSION EXPRESSION
+        | Less EXPRESSION EXPRESSION
+        | LessEqual EXPRESSION EXPRESSION
+        | Equal EXPRESSION EXPRESSION
+        | StrictEqual EXPRESSION EXPRESSION
+        | NotEqual EXPRESSION EXPRESSION
+        | Matches EXPRESSION EXPRESSION
+        | NotMatches EXPRESSION EXPRESSION
+        | Not EXPRESSION
+        | Complement EXPRESSION
+        | LeftShift EXPRESSION EXPRESSION
+        | RightShift EXPRESSION EXPRESSION
+        | And EXPRESSION EXPRESSION
+        | Or EXPRESSION EXPRESSION
 
-         -- primary
-         | NameExp NAME
-         | ArrayRef EXPRESSION [EXPRESSION]
-         | ListExp [EXPRESSION]
-         | SetExp [EXPRESSION]
-         | MapExp [EXPRESSION]
-         | Return [EXPRESSION]
-         | Yield [EXPRESSION]
-         | Defined EXPRESSION
-         | FunBlock EXPRESSION [EXPRESSION] STATEMENT
-         | If EXPRESSION STATEMENT
-         | IfElse EXPRESSION STATEMENT STATEMENT
-         | While EXPRESSION STATEMENT
-         | Case STATEMENT [WHEN]
-         | For [EXPRESSION] EXPRESSION STATEMENT
-         | Begin STATEMENT [RESCUE] (Maybe STATEMENT)
-         | Declaration DECLARATION
+        -- primary
+        | ArrayRef EXPRESSION [EXPRESSION]
+        | ListExp [EXPRESSION]
+        | SetExp [EXPRESSION]
+        | MapExp [EXPRESSION]
 
-         -- literal
-         | NumberLit double
-         | IntLit int
-         | Symbol String
-         | StringLit String
-         | Regexp String
+        -- literal
+        | NumberLit double
+        | IntLit int
+        | Symbol String
+        | StringLit String
+        | Regexp String
+        | BooleanLit boolean
 
 data DECLARATION = 
-           Class NAME (Maybe NAME) STATEMENT
-         | Module NAME STATEMENT
-         | Function EXPRESSION [NAME] STATEMENT
+           Class NAME (Maybe NAME) EXPRESSION
+         | Module NAME EXPRESSION
+         | Function EXPRESSION [NAME] EXPRESSION
+         | Func NAME [NAME] EXPRESSION
+         | FunctionDef String [NAME] EXPRESSION
 
-data WHEN = When [EXPRESSION] STATEMENT
-
--- rescue is the same as When I think, combine!
-data RESCUE = Rescue [EXPRESSION] STATEMENT
 
 
 token String IDENTIFIER
 token double DOUBLE_LITERAL
-token int INTEGER_LITERAL
+token int INT_LITERAL
 token String STRING_LITERAL
 token String REGEXP_LITERAL
+token String TOKEN_SEMI
 
 template EXPRESSION -> EXPRESSION ::= expression:a { a };
 template EXPRESSION -> [EXPRESSION] ::= "(" call_arguments:a ")" { a };
 
-template STATEMENT -> EXPRESSION ::= expression:a { a };
-template STATEMENT -> [EXPRESSION] ::= call_arguments:a { a };
-template STATEMENT -> STATEMENT ::= compound_statement:a { a };
+template EXPRESSION -> EXPRESSION ::= expression:a { a };
+template EXPRESSION -> [EXPRESSION] ::= call_arguments:a { a };
+template EXPRESSION -> EXPRESSION ::= compound_statement:a { a };
 
-template DECLARATION -> EXPRESSION ::= expression:a { a };
-template DECLARATION -> [EXPRESSION] ::= call_arguments:a { a };
-template DECLARATION -> STATEMENT ::= compound_statement:a { a };
+template DECLARATION -> [EXPRESSION] ::= do statements:a "end" { a };
+template DECLARATION -> EXPRESSION ::= do compound_statement:a "end" { a };
 
 -- template Object -> [A] ::= "(" object_list:a ")" { a };
 
--- STATEMENT ::= ... ";" if last child not STATEMENT
+-- EXPRESSION ::= ... ";" if last child not EXPRESSION
 -- keyword at the beginning
 -- no nonterminals juxtaposed
 
@@ -209,51 +215,75 @@ goal          ::= program:a                                                     
                 ;
 
 PROGRAM
-program       ::= compound_statement:a                                                          { Program [a] }
-                | declarations:a                                { Program2 a }
+program       ::= statements:a                                  { ProgramExpressions a }
+                | ";"                                           { ProgramExpressions [] }
+                |                                               { ProgramExpressions [] }
+                | declarations:a                                { ProgramDeclarations a }
+                | ";"                                           { ProgramDeclarations [] }
+                |                                               { ProgramDeclarations [] }
+                | statements_exp:a                              { ProgramExpression a }
+                | ";"                                           { ProgramExpression Skip }
+                |                                               { ProgramExpression Skip }
                 ;
 
 [DECLARATION]
-declarations  ::= declaration:a TERM declarations:as term_opt { a:as }
-                | { [] }
+declarations  ::= declaration:a ";" declarations:as  { a:as }
+                | declaration:a ";" { [a] }
+                | declaration:a { [a] }
                 ;
 
-STATEMENT
-compound_statement      ::= statement:a term_expr_list:b term_opt                               { Block (a:b) }
-                ;
-
-void
-term_opt      ::= TERM                                  { () }
-                | {- empty -}                           { () }
-                ;
-
-[STATEMENT]
-term_expr_list ::= statement:a TERM term_expr_list:b          { a:b }
-                | TERM  { [] }
-                ;
-
-STATEMENT
-statement          ::=
-                call:a "do" block_variable_opt:b compound_statement:c "end"          { DoBlock a b c }
-                | "undef" function_name:a                                       { Undef a }
-                | "alias" function_name:a function_name:b                               { Alias a b }
-                | statement:a "if" expression:c                                    { ExpStatement (If c a) }
-                | statement:a "while" expression:c                                 { ExpStatement (While c a) }
-                | statement:a "unless" expression:c                                { ExpStatement (If (Not c) a) }
-                | statement:a "until" expression:c                                 { ExpStatement (While (Not c) a) }
-                | "BEGIN" "{" compound_statement:a "}"                            { BEGIN a }
-                | "END" "{" compound_statement:a "}"                              { END a }
-                | left_hand_side:x "=" command:a                                   { AssignStatement x a }
-                | left_hand_side:x "=" command:a "do" block_variable_opt:b compound_statement:c "end"  { AssignWithBlock x a b c }
-                | expression:a                                                { ExpStatement a }
+[EXPRESSION]
+statements      ::= statement:a ";" statements:b { a:b }
+                | statement:a ";" { [a] }
+                | statement:a { [a] }
                 ;
 
 EXPRESSION
-expression    ::= left_hand_sides:a "=" arguments:b                                     { Assign (Tuple a) (Tuple b) }
-                | "return" call_arguments:a                                  { Return a }
-                | "yield" call_arguments:a                                   { Yield a }
-                | command:c                                             { c }
-                | "!" command:c                                         { Not c }
+statements_exp ::= statement:a ";" statements_exp:b { Seq a b }
+                | statement:a ";" { a }
+                | statement:a { a }
+                ;
+
+EXPRESSION
+compound_statement      ::= ";" statements:a            { Block a }
+                          | ";" statements_exp:a            { a }
+                          | statements:a            { Block a }
+                          | statements_exp:a            { a }
+                ;
+
+EXPRESSION
+statement          ::=
+                  expression:a                                                { a }
+                  -- expression:a "do" block_variable_opt:b compound_statement:c "end"     { CallWithBlock a b c }
+                -- | expression:a "if" argument:c                                   { If c a }
+                -- | expression:a "while" argument:c                                { While c a }
+                -- | expression:a "unless" argument:c                               { If (Not c) a }
+                -- | expression:a "until" argument:c                                { While (Not c) a }
+                -- | "BEGIN" "{" compound_statement:a "}"                            { BEGIN a }
+                -- | "END" "{" compound_statement:a "}"                              { END a }
+                -- | "return" call_arguments:a                                       { Return a }
+                -- | "yield" call_arguments:a                                        { Yield a }
+                | "if" expression:a then compound_statement:b "end"                     { If a b }
+                | "if" expression:a then compound_statement:b "end"                     { IfElse a b Skip }
+                | "if" expression:a then compound_statement:b else:c "end"              { IfElse a b c }
+                | "unless" expression:a then compound_statement:b "end"                 { If (Not a) b }
+                | "unless" expression:a then compound_statement:b "end"                 { IfElse (Not a) b Skip }
+                | "unless" expression:a then compound_statement:b "else" compound_statement:c "end"   { IfElse (Not a) b c }
+                | "while" expression:a do compound_statement:b "end"                    { While a b }
+                | "until" expression:a do compound_statement:b "end"                    { While (Not a) b }
+                -- | "case" compound_statement:a whens:b "end"                       { Case a b }
+                -- | "case" compound_statement:a whens:b "else" compound_statement:c "end"     { Case a (b ++ [c]) }
+                -- | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { For a b c }
+                -- | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { Foreach (In (Tuple a) b) c }
+                -- | "begin" compound_statement:a rescues:b "end"                                            { Begin a b Nothing }
+                -- | "begin" compound_statement:a rescues:b "else" compound_statement:c "end"                          { Begin a (b ++ [c]) Nothing }
+                -- | "begin" compound_statement:a rescues:b "ensure" compound_statement:c "end"                        { Begin a b (Just c) }
+                -- | "begin" compound_statement:a rescues:b "else" compound_statement:c "ensure" compound_statement:d "end"      { Begin a (b ++ [c]) (Just d) }
+                -- | declaration:a { Declaration a }
+                ;
+
+EXPRESSION
+expression    ::= command:c                                             { c  }
                 | composition:a  { a }
                 ;
 
@@ -269,64 +299,64 @@ negation      ::= "not" argument:a                                          { No
                 ;
 
 EXPRESSION
-call          ::= function:a                                            { a }
-                | command:a                                             { a }
+command       ::= select:a call_arguments:as                                  { Call a as }
                 ;
 
 EXPRESSION
-command       ::= operation:a call_arguments:as                              { Call (Var a) as }
-                | primary:a "." operation:b call_arguments:as                { Call (Select a b) as }
-                | primary:a "::" operation:b call_arguments:as               { Call (ModuleSelect a b) as }
-                | "super" call_arguments:as                                  { Call Super as }
+select ::=      variable:a  { a }
+                | primary:a "." IDENTIFIER:b                             { Select a b }
+                | primary:a "." identifier:b                             { SelectName a b }
                 ;
 
 EXPRESSION
-function      ::= operation:a                                           { Var a }
-                | operation:a "("  ")"                                  { Call (Var a) [] }
-                | operation:a "(" call_arguments:as ")"                 { Call (Var a) as }
-                | primary:a "." operation:b                             { Select a b }
-                | primary:a "." operation:b "("  ")"                    { Call (Select a b) [] }
-                | primary:a "." operation:b "(" call_arguments:as ")"   { Call (Select a b) as }
-                | primary:a "::" operation:b                            { ModuleSelect a b }
-                | primary:a "::" operation:b "("  ")"                   { Call (ModuleSelect a b) [] }
-                | primary:a "::" operation:b "(" call_arguments:as ")"  { Call (ModuleSelect a b) as }
-                | "super" "("  ")"                                      { Call Super [] }
-                | "super" "(" call_arguments:as ")"                     { Call Super as }
-                | "super"                                               { Super }
-                ;
-
--- TODO precedence
-EXPRESSION
-argument      ::= defined:a { a }
+call       ::=    select:a "("  ")"                                      { Call a [] }
+                | select:a "(" call_arguments:as ")"                     { Call a as }
                 ;
 
 EXPRESSION
-defined
-              ::= "defined?" assignment:a                                      { Defined a }
-                | assignment:a { a }
-                ;
-
-EXPRESSION
-assignment    ::= left_hand_side:a "=" assignment:b                                       { Assign a b }
-                | left_hand_side:a "%=" assignment:b                                 { ModAssign a b }
-                | left_hand_side:a "/=" assignment:b                                 { DivAssign a b }
-                | left_hand_side:a "-=" assignment:b                                 { SubAssign a b }
-                | left_hand_side:a "+=" assignment:b                                 { AddAssign a b }
-                | left_hand_side:a "|=" assignment:b                                 { OrAssign a b }
-                | left_hand_side:a "^=" assignment:b                                 { XorAssign a b }
-                | left_hand_side:a "&=" assignment:b                                 { AndAssign a b }
-                | left_hand_side:a ">>=" assignment:b                                 { RightShiftAssign a b }
-                | left_hand_side:a "<<=" assignment:b                                 { LeftShiftAssign a b }
-                | left_hand_side:a "*=" assignment:b                                 { MulAssign a b }
-                | left_hand_side:a "&&=" assignment:b                                 { CondAndAssign a b }
-                | left_hand_side:a "||=" assignment:b                                 { CondOrAssign a b }
-                | left_hand_side:a "**=" assignment:b                                 { ExponentAssign a b }
+argument      ::= assignment:a { a }
                 | conditional:a             { a }
                 ;
 
 EXPRESSION
+assignment    ::= left_hand_side:a "=" conditional:b                                       { Assign a b }
+
+                | IDENTIFIER:a "=" conditional:b                                       { AssignName a b }
+                | IDENTIFIER:a "+=" conditional:b                                       { AssignName a (Add (Var a) b) }
+                | IDENTIFIER:a "%=" conditional:b                                 { AssignName a (Mod (Var a) b) }
+                | IDENTIFIER:a "/=" conditional:b                                 { AssignName a (Div (Var a) b) }
+                | IDENTIFIER:a "-=" conditional:b                                 { AssignName a (Sub (Var a) b) }
+                | IDENTIFIER:a "+=" conditional:b                                 { AssignName a (Add (Var a) b) }
+                | IDENTIFIER:a "|=" conditional:b                                 { AssignName a (BitOr (Var a) b) }
+                | IDENTIFIER:a "^=" conditional:b                                 { AssignName a (BitXor (Var a) b) }
+                | IDENTIFIER:a "&=" conditional:b                                 { AssignName a (BitAnd (Var a) b) }
+                | IDENTIFIER:a ">>=" conditional:b                                 { AssignName a (RightShift (Var a) b) }
+                | IDENTIFIER:a "<<=" conditional:b                                 { AssignName a (LeftShift (Var a) b) }
+                | IDENTIFIER:a "*=" conditional:b                                 { AssignName a (Mul (Var a) b) }
+                | IDENTIFIER:a "&&=" conditional:b                                 { AssignName a (And (Var a) b) }
+                | IDENTIFIER:a "||=" conditional:b                                 { AssignName a (Or (Var a) b) }
+                | IDENTIFIER:a "**=" conditional:b                                 { AssignName a (Exponent (Var a) b) }
+
+                | left_hand_side:a "%=" conditional:b                                 { ModAssign a b }
+                | left_hand_side:a "/=" conditional:b                                 { DivAssign a b }
+                | left_hand_side:a "-=" conditional:b                                 { SubAssign a b }
+                | left_hand_side:a "+=" conditional:b                                 { AddAssign a b }
+                | left_hand_side:a "|=" conditional:b                                 { OrAssign a b }
+                | left_hand_side:a "^=" conditional:b                                 { XorAssign a b }
+                | left_hand_side:a "&=" conditional:b                                 { AndAssign a b }
+                | left_hand_side:a ">>=" conditional:b                                 { RightShiftAssign a b }
+                | left_hand_side:a "<<=" conditional:b                                 { LeftShiftAssign a b }
+                | left_hand_side:a "*=" conditional:b                                 { MulAssign a b }
+                | left_hand_side:a "&&=" conditional:b                                 { CondAndAssign a b }
+                | left_hand_side:a "||=" conditional:b                                 { CondOrAssign a b }
+                | left_hand_side:a "**=" conditional:b                                 { ExponentAssign a b }
+
+                | left_hand_sides:a "=" arguments:b                                     { Assign (Tuple a) (Tuple b) }
+                ;
+
+EXPRESSION
 conditional   ::= range:a { a }
-        | range:a "?" argument:b ":" conditional:c { IfElse a (ExpStatement b) (ExpStatement c) }
+        | range:a "?" conditional:b ":" conditional:c { IfElse a b c }
         ;
 
 
@@ -403,8 +433,10 @@ mul           ::= mul:a "*" unary:b                                       { Mul 
 EXPRESSION
 unary
               ::= 
-                 "+" pow:a                                             { UnaryPlus a }
+                  "+" pow:a                                             { UnaryPlus a }
+                | "+" pow:a                                             { Add (IntLit 0) a }
                 | "-" pow:a                                             { UnaryMinus a }
+                | "-" pow:a                                             { Sub (IntLit 0) a }
                 | "!" pow:a                                             { Not a }
                 | "~" pow:a                                             { Complement a }
                 | pow:a { a }
@@ -416,11 +448,9 @@ pow           ::= primary:a "**" pow:b                                      { Ex
                 ;
 
 EXPRESSION
-primary       ::= "(" compound_statement:a ")"                                    { StatementExp a }
+primary       ::= "(" compound_statement:a ")"                                    { a }
                 | literal:a                                             { a }
-                | variable:a                                            { a }
-                | primary:a "::" identifier:b                           { ModuleSelect a b }
-                | "::" identifier:a                                     { ModuleSelect TopLevelModule a }
+                | select:a                                            { a }
                 | primary:a "[" "]"                                     { ArrayRef a [] }
                 | primary:a "[" arguments:b "]"                         { ArrayRef a b }
                 | "[" "]"                                               { ListExp [] }
@@ -431,29 +461,8 @@ primary       ::= "(" compound_statement:a ")"                                  
                 | "{" assocs:a  "}"                                     { MapExp a }
                 | "{" arguments:a "," "}"                               { SetExp a }
                 | "{" assocs:a "," "}"                                  { MapExp a }
-                | "return"                                              { Return [] }
-                | "return" "("  ")"                                     { Return [] }
-                | "return" "(" call_arguments:a ")"                     { Return a }
-                | "yield"                                               { Yield [] }
-                | "yield" "("  ")"                                      { Yield [] }
-                | "yield" "(" call_arguments:a ")"                      { Yield a }
-                | "defined?" "(" argument:a ")"                         { Defined a }
-                | function:a                                            { a }
-                | function:a "{" block_variable_opt:b compound_statement:c "}"         { FunBlock a b c }
-                | "if" expression:a then compound_statement:b "end"                     { If a b }
-                | "if" expression:a then compound_statement:b else:c "end"              { IfElse a b c }
-                | "unless" expression:a then compound_statement:b "end"                 { If (Not a) b }
-                | "unless" expression:a then compound_statement:b "else" compound_statement:c "end"   { IfElse (Not a) b c }
-                | "while" expression:a do compound_statement:b "end"                    { While a b }
-                | "until" expression:a do compound_statement:b "end"                    { While (Not a) b }
-                | "case" compound_statement:a whens:b "end"                       { Case a b }
-                | "case" compound_statement:a whens:b "else" compound_statement:c "end"     { Case a (b ++ [c]) }
-                | "for" block_variable:a "in" expression:b do compound_statement:c "end"     { For a b c }
-                | "begin" compound_statement:a rescues:b "end"                                            { Begin a b Nothing }
-                | "begin" compound_statement:a rescues:b "else" compound_statement:c "end"                          { Begin a (b ++ [c]) Nothing }
-                | "begin" compound_statement:a rescues:b "ensure" compound_statement:c "end"                        { Begin a b (Just c) }
-                | "begin" compound_statement:a rescues:b "else" compound_statement:c "ensure" compound_statement:d "end"      { Begin a (b ++ [c]) (Just d) }
-                | declaration:a { Declaration a }
+                | call:a "{" block_variable_opt:b compound_statement:c "}"         { FunBlock a b c }
+                | select:a "{" block_variable_opt:b compound_statement:c "}"         { FunBlock a b c }
                 ;
 
 DECLARATION
@@ -461,46 +470,45 @@ declaration ::=
                   "class" identifier:a compound_statement:b "end"                 { (Class a Nothing b) }
                 | "class" identifier:a "<" identifier:s compound_statement:b "end"        { (Class a (Just s) b) }
                 | "module" identifier:a compound_statement:b "end"                { (Module a b) }
-                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { (Function (Var a) as b) }
-                | "def" singleton:a "." function_name:b argument_declaration:as compound_statement:c "end"     { (Function (Select a b) as c) }
-                | "def" singleton:a "::" function_name:b argument_declaration:as compound_statement:c "end"    { (Function (Select a b) as c) }
+                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { (Func a as b) }
+                | "def" function_name:a argument_declaration:as compound_statement:b "end"             { (Function (VarName a) as b) }
+                | "def" singleton:a "." function_name:b argument_declaration:as compound_statement:c "end"     { (Function (SelectName a b) as c) }
+                | "def" IDENTIFIER:a argument_declaration:as compound_statement:b "end"             { (FunctionDef a as b) }
                 ;
 
-RESCUE
+EXPRESSION
 rescue        ::= "rescue" arguments:as do compound_statement:b                        { Rescue as b }
                 | "rescue" do compound_statement:b                                { Rescue [] b }
                 ;
 
-[RESCUE]
+[EXPRESSION]
 rescues       ::= rescue:a rescues:b                                    { a:b }
                 |                                                       { [] }
                 ;
 
-[WHEN]
+[EXPRESSION]
 whens         ::= when:a whens:b                                        { a:b }
                 | when:a                                                { [a] }
                 ;
 
-WHEN
+EXPRESSION
 when          ::= "when" arguments:a then compound_statement:b                    { When a b }
                 ;
 
-STATEMENT
-else          ::= "elsif" expression:a then compound_statement:b else:c                 { ExpStatement (IfElse a b c) }
-                | "elsif" expression:a then compound_statement:b                        { ExpStatement (If a b) }
+EXPRESSION
+else          ::= "elsif" expression:a then compound_statement:b else:c                 { (IfElse a b c) }
+                | "elsif" expression:a then compound_statement:b                        { (If a b) }
                 | "else" compound_statement:a                                     { a }
                 ;
 
 void
-then          ::= TERM                                                  { () }
-                | "then"                                                        { () }
-                | TERM "then"                                                   { () }
+then          ::= "then"                                                        { () }
+                | ";" "then"                                                       { () }
                 ;
 
 void
-do            ::= TERM                                                  { () }
-                | "do"                                                  { () }
-                | TERM "do"                                                     { () }
+do            ::= "do"                                                  { () }
+                | ";" "do"                                                       { () }
                 ;
 
 [EXPRESSION]
@@ -514,29 +522,29 @@ block_variable_opt ::= "|" "|"                                               { [
                 |                                                       { [] }
                 ;
 
+-- don't include the case with just one LHS
 [EXPRESSION]
-left_hand_sides          ::= left_hand_sides_item:a ","                                       { [a] }
-                | left_hand_sides_item:a                                             { [a] }
-                | left_hand_sides_item:a "," left_hand_sides:b                      { a:b } 
+left_hand_sides ::= left_hand_sides_item:a "," left_hand_sides:b                                      { a ++ b }
+                  | left_hand_sides_item:a "," left_hand_sides_item:b                                { a ++ b }
                 ;
 
-EXPRESSION
-left_hand_sides_item     ::= left_hand_side:a                                                 { a }
-                | "(" left_hand_sides:a ")"                                        { Tuple a }
+[EXPRESSION]
+left_hand_sides_item     ::= left_hand_side:a                                                 { [a] }
+                | "(" left_hand_sides:a ")"                                        { a }
                 ;
 
 EXPRESSION
 left_hand_side           ::= variable:a                                 { a }
                 | primary:a "[" "]"                                     { ArrayRef a [] }
                 | primary:a "[" arguments:b "]"                         { ArrayRef a b }
-                | primary:a "." identifier:b                            { Select a b }
+                | primary:a "." IDENTIFIER:b                            { Select a b }
+                | primary:a "." identifier:b                            { SelectName a b }
                 ;
 
 [EXPRESSION]
 call_arguments     ::= arguments:a                                                { a }
                 | arguments:a "," assocs:b                           { a ++ b }
                 | assocs:a                                      { a }
-                | command:a                                             { [a] }
                 ;
 
 [EXPRESSION]
@@ -547,7 +555,7 @@ arguments          ::= argument:a "," arguments:b                               
 [NAME]
 argument_declaration       ::= "(" formals:a ")"                             { a }
                  | "(" ")"                                        { [] }
-                | formals:a TERM                                { a }
+                | formals:a ";"                                { a }
                 ;
 
 [NAME]
@@ -574,23 +582,28 @@ assoc         ::= argument:a "=>" argument:b                              { KeyV
                 ;
 
 EXPRESSION
-variable      ::= var_name:a                                     { NameExp a }
+variable      ::= IDENTIFIER:a                                     { VarName (Identifier a) }
+                | "nil":a                                       { VarName (Identifier a) }
+                | "self":a                                       { VarName (Identifier a) }
+                | "super":a                                               { VarName (Identifier a) }
                 | "nil"                                         { NilLit }
                 | "self"                                        { Self }
+                | "super"                                               { Super }
+                | IDENTIFIER:a                                    { Var a }
+                | "nil":a                                       { Var a }
+                | "self":a                                       { Var a }
+                | "super":a                                               { Var a }
                 ;
 
 EXPRESSION
 literal       ::= DOUBLE_LITERAL:a                                      { NumberLit a }
-                | INTEGER_LITERAL:a                                     { IntLit a }
+                | INT_LITERAL:a                                     { IntLit a }
                 | STRING_LITERAL:a                                      { StringLit a }
                 | HERE_DOC:a                                    { StringLit a }
                 | REGEXP:a                                      { Regexp a }
                 | symbol:a                                      { a }
-                ;
-
--- the scanner generates semicolons for terminator characters
-void
-TERM          ::= ";"           { () }
+                | "true":a                                      { BooleanLit True }
+                | "false":a                                      { BooleanLit False }
                 ;
 
 NAME
@@ -598,8 +611,7 @@ identifier ::= IDENTIFIER:a { Identifier a }
                 ;
 
 EXPRESSION
-symbol ::=  ":" "@" IDENTIFIER:a { Symbol a }
-        | ":" IDENTIFIER:a { Symbol a }
+symbol ::=  ":" IDENTIFIER:a { Symbol a }
         ;
 
 NAME
@@ -629,23 +641,6 @@ function_name ::= IDENTIFIER:a { Identifier a }
         | "-@":a { Identifier a }
         | "[]":a { Identifier a }
         | "[]=":a { Identifier a }
-        ;
-
--- FIXME: should add the ! and ? to the name
-NAME
-operation ::= IDENTIFIER:a "!" { Identifier a }
-            | IDENTIFIER:a "?" { Identifier a }
-            | IDENTIFIER:a { Identifier a }
-            ;
-
-NAME
-var_name ::= IDENTIFIER:a { Identifier a }
-        | "@" IDENTIFIER:a { AtName a }
-        | global_name:a { a }
-        ;
-
-NAME
-global_name ::= "$" IDENTIFIER:a { GlobalName a }
         ;
 
 
