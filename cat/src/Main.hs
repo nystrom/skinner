@@ -74,6 +74,7 @@ isPrimitive (TCon "boolean" []) = True
 isPrimitive t                   = isPrimitiveNumber t
 
 isBuiltin :: Type -> Bool
+isBuiltin (TCon "void" [])                = True
 isBuiltin (TCon "Object" [])              = True
 isBuiltin (TCon "String" [])              = True
 isBuiltin (TCon "java.lang.Object" [])    = True
@@ -113,6 +114,7 @@ convertPrimitive _ _ _ = Nothing
 
 isBuiltinOp :: JExp -> Bool
 isBuiltinOp (JOp "Just" [e] t) =  True
+isBuiltinOp (JK "()" t) = True
 isBuiltinOp (JK "Nothing" t) = True
 isBuiltinOp (JK "Nil" (TCon _ [base])) = True
 isBuiltinOp (JOp ":" es t) = True
@@ -124,6 +126,31 @@ isBuiltinOp (JOp "listToArray" [e] (TCon _ [base])) = True
 isBuiltinOp (JOp "arrayToList" [e] (TCon _ [base])) = True
 isBuiltinOp (JOp "toArray2" [e1, e2] (TCon _ [base])) = True
 isBuiltinOp (JOp "toList2" [e1, e2] (TCon _ [base])) = True
+isBuiltinOp (JOp "long2int" [e] t) = True
+isBuiltinOp (JOp "float2int" [e] t) = True
+isBuiltinOp (JOp "double2int" [e] t) = True
+isBuiltinOp (JOp "int2float" [e] t) = True
+isBuiltinOp (JOp "long2float" [e] t) = True
+isBuiltinOp (JOp "double2float" [e] t) = True
+isBuiltinOp (JOp "int2long" [e] t) = True
+isBuiltinOp (JOp "float2long" [e] t) = True
+isBuiltinOp (JOp "double2long" [e] t) = True
+isBuiltinOp (JOp "float2double" [e] t) = True
+isBuiltinOp (JOp "int2double" [e] t) = True
+isBuiltinOp (JOp "long2double" [e] t) = True
+isBuiltinOp (JOp "unbox_int" [e] t) = True
+isBuiltinOp (JOp "unbox_long" [e] t) = True
+isBuiltinOp (JOp "unbox_float" [e] t) = True
+isBuiltinOp (JOp "unbox_double" [e] t) = True
+isBuiltinOp (JOp "box_int" [e] t) = True
+isBuiltinOp (JOp "box_long" [e] t) = True
+isBuiltinOp (JOp "box_float" [e] t) = True
+isBuiltinOp (JOp "box_double" [e] t) = True
+isBuiltinOp (JOp "charToString" [e] t) = True
+isBuiltinOp (JOp "stringToChar" [e] t) = True
+isBuiltinOp (JOp "size" [e] t) = True
+isBuiltinOp (JOp "isEmpty" [e] t) = True
+isBuiltinOp (JOp "length" [e] t) = True
 isBuiltinOp e = False
 
 coerce :: SubtypeEnv -> JExp -> Type -> Maybe JExp
@@ -169,7 +196,7 @@ coerce hierarchy e t = go (typeof e) t
     -- Array[void] --> int
     -- Maybe[void] --> boolean
     go (TCon "List" [TCon "void" []]) (TCon "int" []) = Just $ JOp "size" [e] t
-    go (TCon "Array" [TCon "void" []]) (TCon "int" []) = Just $ JOp "size" [e] t
+    go (TCon "Array" [TCon "void" []]) (TCon "int" []) = Just $ JOp "length" [e] t
     go (TCon "Maybe" [TCon "void" []]) (TCon "boolean" []) = Just $ JOp "isEmpty" [e] t
 
     -- Maybe[int] --> Integer
@@ -292,15 +319,15 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
         -- that are implemented using lists of operands in the Java AST.
         ([(y1, t1'), (y2, t2')], [(x, TCon "List" [t])]) | t1' == t2' ->
           case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) (TCon "List" [t]) of
-            Just e  -> return [(x, e)]
+            Just e  -> return [(x, e, True)]
             Nothing -> return []
         ([(y1, t1'), (y2, t2')], [(x, TCon "Array" [t])]) | t1' == t2' ->
           case coerce hierarchy (JOp "toArray2" [JVar y1 t1', JVar y2 t1'] (TCon "Array" [t1'])) (TCon "Array" [t]) of
-            Just e  -> return [(x, e)]
+            Just e  -> return [(x, e, True)]
             Nothing -> return []
         ([(y1, t1'), (y2, t2')], [(x, t)]) | t1' == t2' ->
           case coerce hierarchy (JOp "toList2" [JVar y1 t1', JVar y2 t1'] (TCon "List" [t1'])) t of
-            Just e  -> return [(x, e)]
+            Just e  -> return [(x, e, True)]
             Nothing -> return []
 
         (skinFields, fv) | length skinFields == length fv -> do
@@ -316,11 +343,11 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
           -- We just assume the free variables and factory parameters are in the same order. This could be relaxed when the types are different.
           -- In particular, we might have a separate enum parameter that (e.g., PLUS on a BinaryExpression node) that could go anywhere in the parameter list.
 
-          -- TOOD: we need to handle extra arguments like a Position.
+          -- TODO: we need to handle extra arguments like a Position.
 
           otheta <- forM (zip fv skinFields) $ \((x, t), (y, t')) ->
             case coerce hierarchy (JVar y t') t of
-              Just e  -> return $ Just (x, e)
+              Just e  -> return $ Just (x, e, e /= (JVar y t'))
               Nothing -> return Nothing
 
           let theta = catMaybes otheta
@@ -332,7 +359,8 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
     if length theta == length fv
       then do
         let cost = minimum $ map (matchName skin skinLabel) (toBagOfWords new)
-        return [(cost, k, substVars theta new)]
+        let coercedCost = fromIntegral $ length $ filter (\(_,_,coerced) -> coerced) theta
+        return [(cost + coercedCost / (fromIntegral $ length fv), k, substVars (map (\(x,e,coerced) -> (x,e)) theta) new)]
       else
         return []
 
@@ -582,7 +610,8 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
     removeDeadRules rules | trace ("removeDeadRules " ++ show rules) False = undefined
     removeDeadRules rules = filter ruleUsed rules
       where
-        ruleUsed (Rule _ lhs _ _) = lhs == "goal" || any (ntUsed lhs) rules
+        ruleUsed = tracef "ruleUsed" ruleUsed2
+        ruleUsed2 (Rule _ lhs _ _) = lhs == "goal" || any (ntUsed lhs) rules
 
         ntUsed lhs (Rule _ _ rhs _) = any (ntUsed' lhs) rhs
 
@@ -594,7 +623,9 @@ removeUnusedRules matchResults = (fixRules (reachableRules . removeRulesWithUnde
     removeRulesWithUndefinedRHS rules | trace ("removeRulesWithUndefinedRHS " ++ show rules) False = undefined
     removeRulesWithUndefinedRHS rules = filter ruleDefined rules
       where
-        ruleDefined (Rule _ lhs rhs _) = all rhsDefined rhs
+        ruleDefined = tracef "ruleDefined" ruleDefined2
+        ruleDefined2 (Rule _ lhs [] _) = True
+        ruleDefined2 (Rule _ lhs rhs _) = all rhsDefined rhs
 
         rhsDefined (Nonterminal x, _) = x `elem` map (\(Rule _ lhs _ _) -> lhs) rules
         rhsDefined (Terminal x, _) = True
@@ -1084,6 +1115,7 @@ ppTerminalDeclarations tokens rules = nub $ mapMaybe go tokens
 
 ppNonterminalDeclarations rules = nub $ map go rules
   where
+    go (Rule (TCon "void" []) lhs rhs _) = "non terminal Object " ++ lhs ++ ";"
     go (Rule t lhs rhs _) = "non terminal " ++ pp t ++ " " ++ lhs ++ ";"
 
 ppBox t = case boxedType t of
@@ -1199,6 +1231,8 @@ library =
   ]
 
 instance PP Rule where
+  pp (Rule (TCon "void" []) lhs rhs e) =
+        lhs ++ " ::= " ++ intercalate " " (map pp rhs) ++ "\n        {: RESULT = null; :}\n    ;\n"
   pp (Rule t lhs rhs e) = lhs ++ " ::= " ++ intercalate " " (map pp rhs) ++ "\n        {: RESULT = " ++ pp e ++ "; :}\n    ;\n"
 
 instance PP (Sym, String) where
@@ -1213,8 +1247,34 @@ instance PP (String, Type) where
   pp (x, t) = pp t ++ " " ++ x
 
 instance PP JExp where
+  pp (JOp "long2int" [e] t) = "((int)" ++ pp e ++ ")"
+  pp (JOp "float2int" [e] t) = "((int)" ++ pp e ++ ")"
+  pp (JOp "double2int" [e] t) = "((int)" ++ pp e ++ ")"
+  pp (JOp "int2float" [e] t) = "((float)" ++ pp e ++ ")"
+  pp (JOp "long2float" [e] t) = "((float)" ++ pp e ++ ")"
+  pp (JOp "double2float" [e] t) = "((float)" ++ pp e ++ ")"
+  pp (JOp "int2long" [e] t) = "((long)" ++ pp e ++ ")"
+  pp (JOp "float2long" [e] t) = "((long)" ++ pp e ++ ")"
+  pp (JOp "double2long" [e] t) = "((long)" ++ pp e ++ ")"
+  pp (JOp "float2double" [e] t) = "((double)" ++ pp e ++ ")"
+  pp (JOp "int2double" [e] t) = "((double)" ++ pp e ++ ")"
+  pp (JOp "long2double" [e] t) = "((double)" ++ pp e ++ ")"
+  pp (JOp "unbox_int" [e] t) = "((int)" ++ pp e ++ ")"
+  pp (JOp "unbox_long" [e] t) = "((long)" ++ pp e ++ ")"
+  pp (JOp "unbox_float" [e] t) = "((float)" ++ pp e ++ ")"
+  pp (JOp "unbox_double" [e] t) = "((double)" ++ pp e ++ ")"
+  pp (JOp "box_int" [e] t) = "((Integer)" ++ pp e ++ ")"
+  pp (JOp "box_long" [e] t) = "((Long)" ++ pp e ++ ")"
+  pp (JOp "box_float" [e] t) = "((Float)" ++ pp e ++ ")"
+  pp (JOp "box_double" [e] t) = "((Double)" ++ pp e ++ ")"
+  pp (JOp "charToString" [e] t) = "(\"\" " ++ pp e ++ ")"
+  pp (JOp "stringToChar" [e] t) = pp e ++ ".charAt(0)"
+  pp (JOp "size" [e] t) = pp e ++ ".size()"
+  pp (JOp "isEmpty" [e] t) = pp e ++ ".isEmpty()"
+  pp (JOp "length" [e] t) = pp e ++ ".length"
   pp (JOp "getValue" [e] t) = pp e ++ ".getValue()"
   pp (JOp "Just" [e] t) = pp e
+  pp (JK "()" t) = "null"
   pp (JK "Nothing" t) = "null"
   pp (JK "Nil" (TCon _ [base])) = "java.util.Collections.<" ++ pp base ++ ">emptyList()"
   pp (JNew es t) = "new " ++ pp t ++ "(" ++ intercalate ", " (map pp es) ++ ")"
