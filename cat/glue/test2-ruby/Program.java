@@ -84,6 +84,19 @@ class Assign implements Expression {
   }
 }
 
+class Seq implements Expression {
+  Expression fst;
+  Expression snd;
+
+  Seq(Expression fst, Expression snd) {
+    this.fst = fst;
+    this.snd = snd;
+  }
+
+  public String toString() {
+    return "Seq(" + fst + ", " + snd + ")";
+  }
+}
 
 class While implements Expression {
   Expression cond;

@@ -8,6 +8,7 @@ class Var(String name) extends Expression
 
 class If(Expression cond, Expression then, Expression else) extends Expression
 class While(Expression cond, Expression body) extends Expression
+class Seq(Expression fst, Expression snd) extends Expression
 class Assign(String lhs, Expression rhs) extends Expression
 
 class BinExp(BinaryOp op, Expression left, Expression right) extends Expression
@@ -31,6 +32,7 @@ new Assign(lhs, rhs)
 new Var(name)
 new IntLit(value)
 new BooleanLit(value)
+new Seq(fst, snd)
 
 %header
 

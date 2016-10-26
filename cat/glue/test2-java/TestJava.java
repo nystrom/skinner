@@ -10,7 +10,20 @@ public class TestJava {
     }
 
     String file = args[0];
-    FileReader fr = new FileReader(file);
+
+    /*
+    // test the lexer
+    {
+      Reader r = new EscapedUnicodeReader(new FileReader(file));
+      Lexer l = new Lexer(r, file, file);
+      Token t = null;
+      do {
+        t =  l.nextToken();
+        System.out.println(t);
+      } while (! (t instanceof EOF));
+    }
+    */
+
     Reader r = new EscapedUnicodeReader(new FileReader(file));
     Lexer l = new Lexer(r, file, file);
     Parser p = new Parser(l);
