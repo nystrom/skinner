@@ -12,7 +12,7 @@ lex_file = sys.argv[2]
 
 cup = open(cup_file, "r")
 for line in cup.readlines():
-  mo = re.match(r'^terminal.*\sTOKEN([^_]\w*);', line)
+  mo = re.match(r'^terminal.*\sTOKEN([a-zA-Z]\w*);', line)
   if mo:
     keywords.append(mo.group(1))
   mo = re.match(r'^terminal.*\s(TOKEN\w+);', line)
