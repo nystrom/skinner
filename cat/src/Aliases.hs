@@ -5,7 +5,7 @@ module Aliases (Word, Aliases, matchNameWithAliases, Wordy(..), breakNameIntoWor
 
 import Prelude hiding (Word)
 import Data.List (nub, inits)
-import Data.Char (toLower, isLower, isUpper, isSpace)
+import Data.Char (toLower, isLower, isUpper, isSpace, isDigit)
 import Debug.Trace (trace)
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -41,22 +41,25 @@ chooseAlias aliases word = maximum $ expandAliases aliases word
 
 
 
-breakNameIntoWords :: String -> [String]
 -- Break a name like PlusExp or Plus_Exp into words: [Plus, Exp]
-breakNameIntoWords "" = []
--- under_score
-breakNameIntoWords ('_':xs) = "" : breakNameIntoWords (dropWhile (== '_') xs)
--- two words
-breakNameIntoWords (x:xs) | isSpace x = "" : breakNameIntoWords (dropWhile isSpace xs)
--- CamelCase
-breakNameIntoWords (x:y:ys)
-  | isLower x && isUpper y = (x:"") : breakNameIntoWords (y:ys)
---
-breakNameIntoWords (x:xs) = case words of
-    [] -> [x:""]
-    (w:ws) -> (x:w):ws
+breakNameIntoWords :: String -> [String]
+breakNameIntoWords w = filter (not . null) (go w)
   where
-    words = breakNameIntoWords xs
+    go "" = []
+    -- prime
+    go ('\'':xs) = "" : breakNameIntoWords (dropWhile (== '\'') xs)
+    -- under_score
+    go ('_':xs) = "" : breakNameIntoWords (dropWhile (== '_') xs)
+    -- two words
+    go (x:xs) | isSpace x = "" : breakNameIntoWords (dropWhile isSpace xs)
+    -- digits
+    go (x:xs) | isDigit x = "" : breakNameIntoWords (dropWhile isDigit xs)
+    -- CamelCase
+    go (x:y:ys) | isLower x && isUpper y = (x:"") : breakNameIntoWords (y:ys)
+    -- otherwise
+    go (x:xs) = case go xs of
+                  [] -> [x:""]
+                  (w:ws) -> (x:w):ws
 
 matchWordies :: Wordy a => [[String]] -> a -> a -> Double
 matchWordies aliases x y = do
