@@ -2,8 +2,6 @@
 
 To build:
 
-    brew install glpk
-
     cd cat
     cabal install --dependencies-only
     cabal configure
@@ -11,5 +9,5 @@ To build:
 
 To run:
 
-    cabal run java.skin ast.in
+    cabal run cat glue/java.skin glue/test2-java/ast.in
 
