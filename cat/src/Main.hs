@@ -359,8 +359,9 @@ matchConstructors (new @ (JNew args typ @ (TCon label []))) = do
     if length theta == length fv
       then do
         let cost = minimum $ map (matchName skin skinLabel) (toBagOfWords new)
-        let coercedCost = fromIntegral $ length $ filter (\(_,_,coerced) -> coerced) theta
-        return [(cost + coercedCost / (fromIntegral $ length fv), k, substVars (map (\(x,e,coerced) -> (x,e)) theta) new)]
+        let numCoerced = length $ filter (\(_,_,coerced) -> coerced) theta
+        let coercionCost = if null fv then 0 else fromIntegral numCoerced / fromIntegral (length fv)
+        return [(cost + coercionCost, k, substVars (map (\(x,e,coerced) -> (x,e)) theta) new)]
       else
         return []
 
