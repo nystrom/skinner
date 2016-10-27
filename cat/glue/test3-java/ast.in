@@ -1,0 +1,45 @@
+abstract class Program extends Object
+class Program(Expression e) extends Program
+
+abstract class Expression extends Object
+class IntLit(int value) extends Expression
+class BooleanLit(boolean value) extends Expression
+class Var(String name) extends Expression
+
+class If(Expression cond, Expression then, Expression else) extends Expression
+class While(Expression cond, Expression body) extends Expression
+class Seq(Expression fst, Expression snd) extends Expression
+class Assign(String lhs, Expression rhs) extends Expression
+class Skip() extends Expression
+
+class BinExp(BinaryOp op, Expression left, Expression right) extends Expression
+enum BinaryOp { Plus, Minus, Times, Divide, Remainder, Less, Greater, Equals, NotEq, LessEq, GreaterEq }
+
+new Program(e)
+new BinExp(BinaryOp.Plus, left, right)
+new BinExp(BinaryOp.Minus, left, right)
+new BinExp(BinaryOp.Times, left, right)
+new BinExp(BinaryOp.Divide, left, right)
+new BinExp(BinaryOp.Remainder, left, right)
+new BinExp(BinaryOp.Less, left, right)
+new BinExp(BinaryOp.Greater, left, right)
+new BinExp(BinaryOp.Equals, left, right)
+new BinExp(BinaryOp.NotEq, left, right)
+new BinExp(BinaryOp.LessEq, left, right)
+new BinExp(BinaryOp.GreaterEq, left, right)
+new If(cond, then, else)
+new While(cond, body)
+new Assign(lhs, rhs)
+new Var(name)
+new IntLit(value)
+new BooleanLit(value)
+new Seq(fst, snd)
+new Skip()
+
+%header
+
+// header goes here
+
+%body
+
+    // body goes here
